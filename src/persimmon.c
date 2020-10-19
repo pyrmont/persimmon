@@ -257,6 +257,29 @@ static int persimm_vector_compare(void *p1, void *p2) {
     persimm_vector_t *b = (persimm_vector_t *)p2;
     return a == b;
 }
+/* Traversal */
+
+static Janet persimm_vector_next(void *p, Janet key) {
+    persimm_vector_t *vector = (persimm_vector_t *)p;
+
+    if (janet_checktype(key, JANET_NIL)) {
+        if (vector->count > 0) {
+            return janet_wrap_number(0);
+        } else {
+            return janet_wrap_nil();
+        }
+    }
+
+    if (!janet_checksize(key)) janet_panic("expected size as key");
+    size_t index = (size_t)janet_unwrap_number(key);
+    index++;
+
+    if (index < vector->count) {
+        return janet_wrap_number((double)index);
+    } else {
+        return janet_wrap_nil();
+    }
+}
 
 /* Type Definition */
 
@@ -271,7 +294,7 @@ static const JanetAbstractType persimm_vector_type = {
     persimm_vector_to_string, /* String */
     persimm_vector_compare, /* Compare */
     NULL, /* Hash */
-    NULL, /* Next */
+    persimm_vector_next, /* Next */
     JANET_ATEND_NEXT
 };
 

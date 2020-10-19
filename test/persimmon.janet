@@ -20,4 +20,16 @@
   (is (= :qux (get vec2 2))))
 
 
+(deftest next-with-empty-vector
+  (def vec (persimmon/vec))
+  (is (= nil (next vec))))
+
+
+(deftest next-with-non-empty-vector
+  (def vec (persimmon/vec [:foo :bar]))
+  (is (= 0   (next vec)))
+  (is (= 1   (next vec 0)))
+  (is (= nil (next vec 1))))
+
+
 (run-tests!)
