@@ -33,6 +33,19 @@ static Janet persimm_vector_get_at_index(persimm_vector_t *vector, size_t index)
 
 /* Utility Methods */
 
+static int persimm_vector_index(persimm_vector_t *vector, Janet input, size_t *index) {
+    if (!janet_checktype(input, JANET_NUMBER)) janet_panic("expected index as number");
+
+    int32_t vector_length = (int32_t)vector->count;
+
+    int32_t input_index = janet_unwrap_integer(input);
+    if (janet_unwrap_number(input) - (double)input_index != 0) janet_panic("expected index as integer");
+    if ((vector_length + input_index) < 0 || input_index >= vector_length) return 0;
+
+    *index = (input_index < 0) ? (vector_length + input_index) : input_index;
+    return 1;
+}
+
 static void persimm_vector_seed(persimm_vector_t *vector, Janet coll) {
     if (janet_checktypes(coll, JANET_TFLAG_INDEXED)) {
         JanetView view;
@@ -170,20 +183,10 @@ static int persimm_vector_get(void *p, Janet key, Janet *out) {
         return janet_getmethod(janet_unwrap_keyword(key), persimm_vector_methods, out);
     }
 
-    if (!janet_checktype(key, JANET_NUMBER)) janet_panic("expected size as number");
-
     persimm_vector_t *vector = (persimm_vector_t *)p;
-    int32_t vector_length = (int32_t)vector->count;
 
-    int32_t input_index = janet_unwrap_integer(key);
-    if (janet_unwrap_number(key) - (double)input_index != 0) janet_panic("expected size as integer");
-    if (vector_length + input_index < 0) return 0;
-
-    size_t index = (input_index < 0) ? (vector_length + input_index) : input_index;
-
-    if (index >= (size_t)vector_length) {
-        return 0;
-    }
+    size_t index;
+    if (!persimm_vector_index(vector, key, &index)) return 0;
 
     Janet val = persimm_vector_get_at_index(vector, index);
     *out = val;
@@ -300,7 +303,7 @@ static Janet persimm_vector_next(void *p, Janet key) {
     }
 
     if (!janet_checksize(key)) janet_panic("expected size as key");
-    size_t index = (size_t)janet_unwrap_number(key);
+    size_t index = (size_t)janet_unwrap_integer(key);
     index++;
 
     if (index < vector->count) {
@@ -317,7 +320,7 @@ static const JanetAbstractType persimm_vector_type = {
     persimm_vector_gc,
     persimm_vector_mark, /* GC Mark */
     persimm_vector_get, /* Get */
-    NULL, /* Push */
+    NULL, /* Set */
     NULL, /* Marshall */
     NULL, /* Unmarshall */
     persimm_vector_to_string, /* String */
@@ -347,9 +350,8 @@ static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
 
     persimm_vector_t *old_vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
 
-    if (!janet_checktype(argv[1], JANET_NUMBER)) janet_panic("index must be a number");
-    size_t index = janet_getsize(argv, 1);
-    if (index >= old_vector->count) janet_panic("index outside range");
+    size_t index;
+    if (!persimm_vector_index(old_vector, argv[1], &index)) janet_panic("index out of bounds");
 
     Janet *item = malloc(sizeof(Janet));
     memcpy(item, argv + 2, sizeof(Janet));
