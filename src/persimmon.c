@@ -221,6 +221,8 @@ static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immu
         vector->shift += BITS;
         vector->root = new_root;
         new_root->items[0] = old_root;
+    } else {
+        if (immutable) vector->root = persimm_vector_copy_node(vector->root);
     }
 
     size_t index = old_count - WIDTH;
@@ -230,7 +232,10 @@ static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immu
         if (NULL == node->items[curr_index]) {
             node->items[curr_index] = persimm_vector_new_node(PERSIMM_NODE_INNER);
         }
-        if (immutable) node = persimm_vector_copy_node(node);
+        if (immutable) {
+            persimm_node_t *child = (persimm_node_t *)node->items[curr_index];
+            node->items[curr_index] = persimm_vector_copy_node(child);
+        }
         node = (persimm_node_t *)node->items[curr_index];
     }
     node->items[(index >> BITS) & MASK] = old_tail;
@@ -243,17 +248,20 @@ static void persimm_vector_update(persimm_vector_t *vector, size_t index, Janet 
         return;
     }
 
+    if (immutable) vector->root = persimm_vector_copy_node(vector->root);
+
     persimm_node_t *node = vector->root;
     for (size_t level = vector->shift; level > 0; level -= BITS) {
         size_t curr_index = (index >> level) & MASK;
         if (NULL == node->items[curr_index]) {
             node->items[curr_index] = persimm_vector_new_node(PERSIMM_NODE_INNER);
         }
-        if (immutable) node = persimm_vector_copy_node(node);
+        if (immutable) {
+            persimm_node_t *child = (persimm_node_t *)node->items[curr_index];
+            node->items[curr_index] = persimm_vector_copy_node(child);
+        }
         node = (persimm_node_t *)node->items[curr_index];
     }
-
-    if (immutable) node = persimm_vector_copy_node(node);
     node->items[index & MASK] = item;
 }
 
