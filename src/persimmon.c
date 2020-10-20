@@ -143,7 +143,6 @@ static int persimm_vector_mark(void *p, size_t size) {
     return 0;
 }
 
-
 /* Accessing */
 
 static JanetMethod persimm_vector_methods[2];
@@ -237,6 +236,27 @@ static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immu
     node->items[(index >> BITS) & MASK] = old_tail;
 }
 
+static void persimm_vector_update(persimm_vector_t *vector, size_t index, Janet *item, bool immutable) {
+    if (index >= (vector->count - vector->tail_count)) {
+        if (immutable) vector->tail = persimm_vector_copy_node(vector->tail);
+        vector->tail->items[index] = item;
+        return;
+    }
+
+    persimm_node_t *node = vector->root;
+    for (size_t level = vector->shift; level > 0; level -= BITS) {
+        size_t curr_index = (index >> level) & MASK;
+        if (NULL == node->items[curr_index]) {
+            node->items[curr_index] = persimm_vector_new_node(PERSIMM_NODE_INNER);
+        }
+        if (immutable) node = persimm_vector_copy_node(node);
+        node = (persimm_node_t *)node->items[curr_index];
+    }
+
+    if (immutable) node = persimm_vector_copy_node(node);
+    node->items[index & MASK] = item;
+}
+
 /* String */
 
 static void persimm_vector_to_string(void *p, JanetBuffer *buf) {
@@ -313,6 +333,26 @@ static Janet cfun_persimm_vec(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(vector);
 }
 
+static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 3);
+
+    persimm_vector_t *old_vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
+
+    if (!janet_checktype(argv[1], JANET_NUMBER)) janet_panic("index must be a number");
+    size_t index = janet_getsize(argv, 1);
+    if (index >= old_vector->count) janet_panic("index outside range");
+
+    Janet *item = malloc(sizeof(Janet));
+    memcpy(item, argv + 2, sizeof(Janet));
+
+    persimm_vector_t *new_vector = (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
+    persimm_vector_clone(old_vector, new_vector);
+
+    persimm_vector_update(new_vector, index, item, true);
+
+    return janet_wrap_abstract(new_vector);
+}
+
 static Janet cfun_persimm_conj(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 2);
 
@@ -322,14 +362,30 @@ static Janet cfun_persimm_conj(int32_t argc, Janet *argv) {
 
     Janet *item = malloc(sizeof(Janet));
     memcpy(item, argv + 1, sizeof(Janet));
+
     persimm_vector_push(new_vector, item, true);
 
     return janet_wrap_abstract(new_vector);
 }
 
+static Janet cfun_persimm_to_array(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 1);
+
+    persimm_vector_t *vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
+
+    JanetArray *array = janet_array(vector->count);
+    for (size_t i = 0; i < vector->count; i++) {
+        janet_array_push(array, persimm_vector_get_at_index(vector, i));
+    }
+
+    return janet_wrap_array(array);
+}
+
 static const JanetReg cfuns[] = {
     {"vec", cfun_persimm_vec, NULL},
+    {"assoc", cfun_persimm_assoc, NULL},
     {"conj", cfun_persimm_conj, NULL},
+    {"to-array", cfun_persimm_to_array, NULL},
     {NULL, NULL, NULL}
 };
 

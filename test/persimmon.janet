@@ -32,4 +32,11 @@
   (is (= nil (next vec 1))))
 
 
+(deftest assoc-with-valid-index
+  (def vec1 (persimmon/vec [:foo :bar]))
+  (def vec2 (persimmon/assoc vec1 0 :qux))
+  (is (== [:foo :bar] (persimmon/to-array vec1)))
+  (is (== [:qux :bar] (persimmon/to-array vec2))))
+
+
 (run-tests!)
