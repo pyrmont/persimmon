@@ -47,7 +47,7 @@ static void persimm_vector_seed(persimm_vector_t *vector, Janet coll) {
     }
 }
 
-/* Deinitilisation */
+/* Deinitilising */
 
 static void persimm_node_free(persimm_node_t *node) {
     if (NULL == node) return;
@@ -81,7 +81,7 @@ static int persimm_vector_gc(void *p, size_t size) {
     return 0;
 }
 
-/* Initialisation */
+/* Initialising  */
 
 static void persimm_vector_clone(persimm_vector_t *old_v, persimm_vector_t *new_v) {
     new_v->shift = old_v->shift;
@@ -190,7 +190,7 @@ static int persimm_vector_get(void *p, Janet key, Janet *out) {
     return 1;
 }
 
-/* Insertion */
+/* Inserting */
 
 static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immutable) {
     if (vector->tail_count < WIDTH) {
@@ -224,7 +224,6 @@ static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immu
     } else {
         if (immutable) vector->root = persimm_vector_copy_node(vector->root);
     }
-
 
     size_t index = old_count - WIDTH;
     persimm_node_t *node = vector->root;
@@ -266,7 +265,7 @@ static void persimm_vector_update(persimm_vector_t *vector, size_t index, Janet 
     node->items[index & MASK] = item;
 }
 
-/* String */
+/* Stringifying */
 
 static void persimm_vector_to_string(void *p, JanetBuffer *buf) {
     persimm_vector_t *vector = (persimm_vector_t *)p;
@@ -279,14 +278,15 @@ static void persimm_vector_to_string(void *p, JanetBuffer *buf) {
     janet_buffer_push_cstring(buf, "]");
 }
 
-/* Comparison */
+/* Comparing */
 
 static int persimm_vector_compare(void *p1, void *p2) {
     persimm_vector_t *a = (persimm_vector_t *)p1;
     persimm_vector_t *b = (persimm_vector_t *)p2;
     return a == b;
 }
-/* Traversal */
+
+/* Traversing */
 
 static Janet persimm_vector_next(void *p, Janet key) {
     persimm_vector_t *vector = (persimm_vector_t *)p;
