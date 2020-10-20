@@ -99,7 +99,7 @@ static persimm_node_t *persimm_vector_copy_node(persimm_node_t *node) {
     copy->ref_count = 1;
     for (size_t i = 0; i < WIDTH; i++) {
         copy->items[i] = node->items[i];
-        if (copy->kind == PERSIMM_NODE_INNER) {
+        if (copy->kind == PERSIMM_NODE_INNER && NULL != copy->items[i]) {
             ((persimm_node_t *)copy->items[i])->ref_count++;
         }
     }
@@ -224,6 +224,7 @@ static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immu
     } else {
         if (immutable) vector->root = persimm_vector_copy_node(vector->root);
     }
+
 
     size_t index = old_count - WIDTH;
     persimm_node_t *node = vector->root;
