@@ -28,7 +28,7 @@ jobs:
     - name: extract janet
       run: tar -xvzf janet-${{ steps.janet-ver.outputs.tag }}-linux.tar.gz
     - name: add directory to path
-      run: echo "::add-path::janet-${{ steps.janet-ver.outputs.tag }}-linux"
+      run: echo "janet-${{ steps.janet-ver.outputs.tag }}-linux" >> $GITHUB_PATH
     - name: make modules directory
       run: mkdir modules
     - name: set JANET_PATH
