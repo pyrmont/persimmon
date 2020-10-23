@@ -51,4 +51,16 @@
   (is (== [:qux :bar] (persimmon/to-array vec2))))
 
 
+(deftest hashing-with-equivalent-vectors
+  (def h1 (hash (persimmon/vec [:foo :bar])))
+  (def h2 (hash (persimmon/vec [:foo :bar])))
+  (is (= h1 h2)))
+
+
+(deftest hashing-with-different-vectors
+  (def h1 (hash (persimmon/vec [:foo :bar])))
+  (def h2 (hash (persimmon/vec [:bar :foo])))
+  (is (not (= h1 h2))))
+
+
 (run-tests!)

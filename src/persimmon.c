@@ -289,6 +289,18 @@ static int persimm_vector_compare(void *p1, void *p2) {
     return a == b;
 }
 
+/* Hashing */
+
+static int32_t persimm_vector_hash(void *p, size_t size) {
+    (void) size;
+    persimm_vector_t *vector = (persimm_vector_t *)p;
+    uint32_t hash = 5381;
+    for (size_t i = 0; i < vector->count; i++) {
+        hash = (hash << 5) + hash + janet_hash(persimm_vector_get_at_index(vector, i));
+    }
+    return (int32_t)hash;
+}
+
 /* Traversing */
 
 static Janet persimm_vector_next(void *p, Janet key) {
@@ -325,7 +337,7 @@ static const JanetAbstractType persimm_vector_type = {
     NULL, /* Unmarshall */
     persimm_vector_to_string, /* String */
     persimm_vector_compare, /* Compare */
-    NULL, /* Hash */
+    persimm_vector_hash, /* Hash */
     persimm_vector_next, /* Next */
     JANET_ATEND_NEXT
 };
