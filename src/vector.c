@@ -50,16 +50,19 @@ static persimm_vector_node *persimm_vector_copy_node(persimm_vector_node *node) 
     return copy;
 }
 
-static persimm_vector *persimm_vector_copy(persimm_vector *src) {
-    persimm_vector *dest = malloc(sizeof(persimm_vector));
-    dest->shift = src->shift;
-    dest->count = src->count;
-    dest->tail_count = src->tail_count;
-    dest->root = src->root;
-    if (NULL != dest->root) dest->root->ref_count++;
-    dest->tail = src->tail;
-    if (NULL != dest->tail) dest->tail->ref_count++;
-    return dest;
+static persimm_vector *persimm_vector_copy(persimm_vector *vector) {
+    persimm_vector *copy = malloc(sizeof(persimm_vector));
+    if (NULL == copy) return NULL;
+
+    copy->shift = vector->shift;
+    copy->count = vector->count;
+    copy->tail_count = vector->tail_count;
+    copy->root = vector->root;
+    if (NULL != copy->root) copy->root->ref_count++;
+    copy->tail = vector->tail;
+    if (NULL != copy->tail) copy->tail->ref_count++;
+
+    return copy;
 }
 
 /* Initialising  */
@@ -114,6 +117,7 @@ persimm_error_code persimm_vector_push(persimm_vector *old, persimm_vector **new
 
     if (NULL != new) {
         *new = persimm_vector_copy(old);
+        if (NULL == new) return PERSIMM_ERROR_MALLOC;
         vector = *new;
         immutable = true;
     }
@@ -194,6 +198,7 @@ persimm_error_code persimm_vector_update(persimm_vector *old, persimm_vector **n
 
     if (NULL != new) {
         *new = persimm_vector_copy(old);
+        if (NULL == new) return PERSIMM_ERROR_MALLOC;
         vector = *new;
         immutable = true;
     }
@@ -245,6 +250,7 @@ persimm_error_code persimm_vector_pop(persimm_vector *old, persimm_vector **new,
 
     if (NULL != new) {
         *new = persimm_vector_copy(old);
+        if (NULL == new) return PERSIMM_ERROR_MALLOC;
         vector = *new;
         immutable = true;
     }
