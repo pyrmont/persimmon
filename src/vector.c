@@ -7,7 +7,7 @@ static bool persimm_vector_oob(persimm_vector *vector, size_t index) {
 }
 
 
-/* Deiniatilising */
+/* Deinitialising */
 
 static void persimm_vector_free_node(persimm_vector_node *node) {
     if (NULL == node) return;
