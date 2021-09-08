@@ -3,7 +3,7 @@
 /* Utilities */
 
 static bool persimm_vector_oob(persimm_vector *vector, size_t index) {
-    return (index < 0) || (index >= vector->count);
+    return index >= vector->count;
 }
 
 /* Deinitialising */
