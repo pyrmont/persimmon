@@ -361,7 +361,7 @@ static void print_vector(const char *name, persimm_vector *vector) {
     printf(" ]\n");
 }
 
-int main(int argc, char *argv[]) {
+int main() {
     persimm_vector *vector = malloc(sizeof(persimm_vector));
     persimm_error_code err = 0;
 
