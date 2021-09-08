@@ -6,7 +6,6 @@ static bool persimm_vector_oob(persimm_vector *vector, size_t index) {
     return (index < 0) || (index >= vector->count);
 }
 
-
 /* Deinitialising */
 
 static void persimm_vector_free_node(persimm_vector_node *node) {
@@ -51,14 +50,16 @@ static persimm_vector_node *persimm_vector_copy_node(persimm_vector_node *node) 
     return copy;
 }
 
-static void persimm_vector_copy(persimm_vector *src, persimm_vector *dst) {
-    dst->shift = src->shift;
-    dst->count = src->count;
-    dst->tail_count = src->tail_count;
-    dst->root = src->root;
-    if (NULL != dst->root) dst->root->ref_count++;
-    dst->tail = src->tail;
-    if (NULL != dst->tail) dst->tail->ref_count++;
+static persimm_vector *persimm_vector_copy(persimm_vector *src) {
+    persimm_vector *dest = malloc(sizeof(persimm_vector));
+    dest->shift = src->shift;
+    dest->count = src->count;
+    dest->tail_count = src->tail_count;
+    dest->root = src->root;
+    if (NULL != dest->root) dest->root->ref_count++;
+    dest->tail = src->tail;
+    if (NULL != dest->tail) dest->tail->ref_count++;
+    return dest;
 }
 
 /* Initialising  */
@@ -107,13 +108,13 @@ persimm_error_code persimm_vector_get(persimm_vector *vector, size_t index, void
 
 /* Adding */
 
-persimm_error_code persimm_vector_push(persimm_vector *old, persimm_vector *new, void *item) {
+persimm_error_code persimm_vector_push(persimm_vector *old, persimm_vector **new, void *item) {
     bool immutable = false;
     persimm_vector *vector = old;
 
     if (NULL != new) {
-        persimm_vector_copy(old, new);
-        vector = new;
+        *new = persimm_vector_copy(old);
+        vector = *new;
         immutable = true;
     }
 
@@ -185,15 +186,15 @@ persimm_error_code persimm_vector_push(persimm_vector *old, persimm_vector *new,
     return PERSIMM_ERROR_NONE;
 }
 
-persimm_error_code persimm_vector_update(persimm_vector *old, persimm_vector *new, void *item, size_t index) {
+persimm_error_code persimm_vector_update(persimm_vector *old, persimm_vector **new, void *item, size_t index) {
     if (persimm_vector_oob(old, index)) return PERSIMM_ERROR_BOUNDS;
 
     bool immutable = false;
     persimm_vector *vector = old;
 
     if (NULL != new) {
-        persimm_vector_copy(old, new);
-        vector = new;
+        *new = persimm_vector_copy(old);
+        vector = *new;
         immutable = true;
     }
 
@@ -236,15 +237,15 @@ persimm_error_code persimm_vector_update(persimm_vector *old, persimm_vector *ne
 
 /* Removing */
 
-persimm_error_code persimm_vector_pop(persimm_vector *old, persimm_vector *new, void **result) {
+persimm_error_code persimm_vector_pop(persimm_vector *old, persimm_vector **new, void **result) {
     if (old->count == 0) return PERSIMM_ERROR_EMPTY;
 
     bool immutable = false;
     persimm_vector *vector = old;
 
     if (NULL != new) {
-        persimm_vector_copy(old, new);
-        vector = new;
+        *new = persimm_vector_copy(old);
+        vector = *new;
         immutable = true;
     }
 
@@ -355,10 +356,10 @@ static void print_vector(const char *name, persimm_vector *vector) {
 }
 
 int main(int argc, char *argv[]) {
-    persimm_vector vector;
+    persimm_vector *vector = malloc(sizeof(persimm_vector));
     persimm_error_code err = 0;
 
-    persimm_vector_init(&vector);
+    persimm_vector_init(vector);
     printf("%s\n\n", "Vector initialised");
 
     int int_array[] = { 1, 2, 3, 4, 5 };
@@ -366,37 +367,42 @@ int main(int argc, char *argv[]) {
     printf("Array: [");
     for (size_t i = 0; i < 5; i++) {
         printf(" %d", int_array[i]);
-        err = persimm_vector_push(&vector, NULL, &int_array[i]);
+        err = persimm_vector_push(vector, NULL, &int_array[i]);
         if (err) return 1;
     }
     printf(" ]\n");
 
     printf("\nAfter pushing\n");
 
-    print_vector("vector", &vector);
+    print_vector("vector", vector);
 
     int lucky = 37;
-    persimm_vector other_vector;
-    err = persimm_vector_update(&vector, &other_vector, &lucky, 0);
+    persimm_vector *other_vector;
+    err = persimm_vector_update(vector, &other_vector, &lucky, 0);
     if (err) return 1;
 
     printf("\nAfter updating\n");
 
-    print_vector("vector", &vector);
-    print_vector("other_vector", &other_vector);
+    print_vector("vector", vector);
+    print_vector("other_vector", other_vector);
 
     void *result = NULL;
-    err = persimm_vector_pop(&vector, NULL, &result);
+    err = persimm_vector_pop(vector, NULL, &result);
     if (err) return 1;
 
     printf("\nAfter popping\n");
 
-    print_vector("vector", &vector);
-    print_vector("other_vector", &other_vector);
+    print_vector("vector", vector);
+    print_vector("other_vector", other_vector);
 
-    persimm_vector_deinit(&vector);
-    persimm_vector_deinit(&other_vector);
-    printf("\n%s\n", "Vectors deinitialised");
+    persimm_vector_deinit(vector);
+    persimm_vector_deinit(other_vector);
+    printf("\nVectors deinitialised\n");
+
+    free(vector);
+    free(other_vector);
+
+    printf("Vectors freed\n");
 
     return 0;
 }
