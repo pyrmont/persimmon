@@ -20,7 +20,6 @@ static persimm_error_code persimm_vector_free_node(persimm_vector_node *node, si
         return PERSIMM_ERROR_NONE;
     }
 
-    /* size_t num_nodes = PERSIMM_VECTOR_WIDTH * height; */
     size_t num_nodes = height;
     int top = 0;
 
@@ -60,26 +59,6 @@ static persimm_error_code persimm_vector_free_node(persimm_vector_node *node, si
             }
         }
     }
-    /* while (top >= 0) { */
-    /*     current = nodes[top--]; */
-    /*     if (current->ref_count > 1) { */
-    /*         current->ref_count--; */
-    /*     } else { */
-    /*         if (current->kind == PERSIMM_NODE_INNER) { */
-    /*             if ((top + PERSIMM_VECTOR_WIDTH) > num_nodes) { */
-    /*                 num_nodes += PERSIMM_VECTOR_WIDTH; */
-    /*                 nodes = realloc(nodes, num_nodes * sizeof(persimm_vector_node*)); */
-    /*                 if (NULL == nodes) return PERSIMM_ERROR_MEMORY; */
-    /*             } */
-    /*             for (int i = PERSIMM_VECTOR_WIDTH - 1; i >= 0; i--) { */
-    /*                 if (NULL == current->items[i]) continue; */
-    /*                 nodes[++top] = current->items[i]; */
-    /*                 current->items[i] = NULL; */
-    /*             } */
-    /*         } */
-    /*         free(current); */
-    /*     } */
-    /* } */
 
     free(nodes);
     free(indexes);
@@ -242,7 +221,6 @@ static persimm_vector *persimm_vector_clone(persimm_vector *vector, size_t index
         }
     }
 
-
     return clone;
 }
 
@@ -363,6 +341,7 @@ persimm_error_code persimm_vector_update(persimm_vector *old, persimm_vector **n
         immutable = true;
     }
 
+    /* Step 1: Check if index is in tail */
     size_t tail_start = vector->count - vector->tail_count;
     if (index >= tail_start) {
         if (immutable) {
@@ -378,6 +357,7 @@ persimm_error_code persimm_vector_update(persimm_vector *old, persimm_vector **n
             if (NULL == vector->root) return PERSIMM_ERROR_MEMORY;
         }
 
+        /* Step 2: Descend trie */
         persimm_vector_node *node = vector->root;
         for (size_t level = vector->shift; level > 0; level -= PERSIMM_VECTOR_BITS) {
             size_t curr_index = (index >> level) & PERSIMM_VECTOR_MASK;
@@ -394,6 +374,7 @@ persimm_error_code persimm_vector_update(persimm_vector *old, persimm_vector **n
             node = child;
         }
 
+        /* Step 3: Replace item */
         node->items[index & PERSIMM_VECTOR_MASK] = item;
     }
 
@@ -412,12 +393,14 @@ persimm_error_code persimm_vector_insert(persimm_vector *old, persimm_vector **n
         vector = *new;
     }
 
+    /* Step 1: Shift last item */
     void *last = NULL;
     err = persimm_vector_get(vector, vector->count - 1, &last);
     if (err) return err;
     err = persimm_vector_push(vector, NULL, last);
     if (err) return err;
 
+    /* Step 2: Shift other items from index */
     for (size_t i = vector->count - 2; i >= index; i--) {
         void *curr_item = NULL;
         err = persimm_vector_get(vector, i, &curr_item);
@@ -426,6 +409,7 @@ persimm_error_code persimm_vector_insert(persimm_vector *old, persimm_vector **n
         if (err) return err;
     }
 
+    /* Step 3: Replace value at index */
     err = persimm_vector_update(vector, NULL, item, index);
     if (err) return err;
 
