@@ -8,6 +8,22 @@
 /* Put behind a debug flag */
 #include <stdio.h>
 
+/* Error Goto */
+
+#define persimm_goto(label, error_code) do { \
+    err = error_code; \
+    goto label; \
+} while (0)
+
+/* Memory Safe Allocation */
+
+void *persimm_realloc(void *memblock, size_t size) {
+    void *old_memblock = memblock;
+    memblock = realloc(memblock, size);
+    if (NULL == memblock) free(old_memblock);
+    return memblock;
+}
+
 /* Enums */
 
 typedef enum {
