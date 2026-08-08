@@ -57,10 +57,16 @@ typedef void (*persimm_visit_fn)(void *slot, size_t index, void *ctx);
 /* Types */
 
 typedef struct persimm_node persimm_node_t;
+typedef struct persimm_cell persimm_cell_t;
 
 /*
- * Fields are readable by the host (`count` in particular) but must only be
- * written through the functions below.
+ * In each structure below, fields are readable by the host (`count` in
+ * particular) but must only be written through the functions that follow.
+ */
+
+/*
+ * A bit-partitioned trie of PERSIMM_WIDTH-way nodes with a tail buffer.
+ * Indexing and appending are effectively constant time.
  */
 typedef struct {
     size_t shift;
@@ -73,17 +79,49 @@ typedef struct {
     persimm_node_t *tail;
 } persimm_vector_t;
 
+/*
+ * A singly linked chain of cells. Consing and taking the rest are constant
+ * time whatever the length; indexing is linear.
+ */
+typedef struct {
+    size_t count;
+    size_t elem_size;
+    const persimm_elem_ops *ops;
+    void *ctx;
+    persimm_cell_t *head;
+} persimm_list_t;
+
+/*
+ * A resumable position in a list, owned by the host. persimm_list_ref_from
+ * walks forward from one rather than from the head, which is what turns a
+ * front-to-back traversal from quadratic into linear.
+ *
+ * The core deliberately keeps no cursor inside persimm_list_t. A read would
+ * then write to a structure another thread may be reading, which is exactly
+ * what the atomic reference counts exist to avoid. A host that shares a list
+ * across threads gives each thread its own cursor.
+ *
+ * Treat the fields as opaque. A cursor is safe to point at any list, or at a
+ * list that has since changed: it notices and starts again from the head.
+ */
+typedef struct {
+    const persimm_list_t *list;
+    size_t count;
+    size_t index;
+    persimm_cell_t *cell;
+} persimm_list_cursor_t;
+
 /* Reference Counting */
 
 /*
- * Nodes are shared between vectors and their reference counts are atomic where
- * the toolchain provides atomics. This returns whether that was the case for
- * this build: when it is false, a graph of vectors must not be shared across
- * threads.
+ * Nodes and cells are shared between structures and their reference counts are
+ * atomic where the toolchain provides atomics. This returns whether that was
+ * the case for this build: when it is false, a graph of structures must not be
+ * shared across threads.
  */
 bool persimm_has_atomic_refcounts(void);
 
-/* Initialising */
+/* Vectors */
 
 /*
  * Prepares a vector for use. `elem_size` must be non-zero. `ops` and `ctx` may
@@ -98,11 +136,7 @@ persimm_status persimm_vector_init(persimm_vector_t *vector, size_t elem_size,
  */
 void persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest);
 
-/* Deinitialising */
-
 void persimm_vector_deinit(persimm_vector_t *vector);
-
-/* Accessing */
 
 /*
  * Returns a pointer to the storage slot for `index`, or NULL if the index is
@@ -116,8 +150,6 @@ void *persimm_vector_ref(const persimm_vector_t *vector, size_t index);
  * backwards from the end require. Returns false if the result is out of bounds.
  */
 bool persimm_vector_index(const persimm_vector_t *vector, int64_t input, size_t *index);
-
-/* Inserting */
 
 /*
  * Appends `elem` to the vector, copying `elem_size` bytes out of it and
@@ -137,8 +169,6 @@ persimm_status persimm_vector_push(persimm_vector_t *vector, const void *elem, b
 persimm_status persimm_vector_update(persimm_vector_t *vector, size_t index, const void *elem,
                                      bool immutable);
 
-/* Traversing */
-
 /*
  * Walks the trie once, in index order, calling `fn` with each element's slot.
  */
@@ -148,5 +178,80 @@ void persimm_vector_foreach(const persimm_vector_t *vector, persimm_visit_fn fn,
  * Calls the element table's `trace` callback for every element.
  */
 void persimm_vector_trace(const persimm_vector_t *vector);
+
+/* Lists */
+
+/*
+ * Prepares an empty list for use. `elem_size` must be non-zero. `ops` and `ctx`
+ * may be NULL. Unlike a vector, a list allocates nothing until something is
+ * consed onto it.
+ */
+persimm_status persimm_list_init(persimm_list_t *list, size_t elem_size,
+                                 const persimm_elem_ops *ops, void *ctx);
+
+/*
+ * Points `dest` at the same chain as `src`. `dest` need not be initialised and
+ * must not be already, or its cells will leak.
+ */
+void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest);
+
+void persimm_list_deinit(persimm_list_t *list);
+
+/*
+ * Returns a pointer to the head element's storage slot, or NULL if the list is
+ * empty. As with a vector, the pointer does not survive later operations.
+ */
+void *persimm_list_first(const persimm_list_t *list);
+
+/*
+ * Returns a pointer to the storage slot for `index`, or NULL if the index is
+ * out of bounds. This walks the chain from the head, so it is linear in
+ * `index`.
+ */
+void *persimm_list_ref(const persimm_list_t *list, size_t index);
+
+/*
+ * Puts a cursor back into its initial state, from which it walks from the
+ * head. A cursor must be reset before its first use: it is otherwise whatever
+ * its storage happened to hold.
+ */
+void persimm_list_cursor_reset(persimm_list_cursor_t *cursor);
+
+/*
+ * As persimm_list_ref, but resumes from `cursor` when it belongs to this list
+ * and sits at or before `index`, and leaves it pointing at what was returned.
+ * Walking a list from front to back this way costs one step per element.
+ * Indices that go backwards are answered from the head, and so cost no more
+ * than persimm_list_ref would.
+ */
+void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
+                            size_t index);
+
+bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index);
+
+/*
+ * Prepends `elem` to the list, copying `elem_size` bytes out of it and
+ * retaining the result. There is no mutable variant: a cons never writes to an
+ * existing cell, so it is safe whether or not the chain is shared.
+ */
+persimm_status persimm_list_cons(persimm_list_t *list, const void *elem);
+
+/*
+ * Drops the head of the list, releasing it. Returns PERSIMM_ERR_BOUNDS if the
+ * list is already empty. The cells behind the new head are untouched and stay
+ * shared with any list still holding the old head.
+ */
+persimm_status persimm_list_rest(persimm_list_t *list);
+
+/*
+ * Walks the chain once, from head to tail, calling `fn` with each element's
+ * slot.
+ */
+void persimm_list_foreach(const persimm_list_t *list, persimm_visit_fn fn, void *ctx);
+
+/*
+ * Calls the element table's `trace` callback for every element.
+ */
+void persimm_list_trace(const persimm_list_t *list);
 
 #endif /* end of include guard */
