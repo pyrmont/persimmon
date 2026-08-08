@@ -87,6 +87,18 @@
   (is (== [:quux :foo :bar :qux] (persimmon/to-array lst3))))
 
 
+# `length` reads the abstract type's length slot while `:length` goes through
+# the method table. Both are supported and must agree.
+(deftest length-of-a-list
+  (is (= 0 (length (persimmon/list))))
+  (is (= 0 (:length (persimmon/list))))
+  (def lst (persimmon/list (numbers 100)))
+  (is (= 100 (length lst)))
+  (is (= 100 (:length lst)))
+  (is (= 99 (length (persimmon/rest lst))))
+  (is (= 101 (length (persimmon/conj lst :head)))))
+
+
 (deftest get-with-negative-index
   (def lst (persimmon/list [:foo :bar :qux]))
   (is (= :qux (get lst -1)))

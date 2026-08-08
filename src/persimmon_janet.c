@@ -135,6 +135,11 @@ static Janet janet_persimm_vector_next(void *p, Janet key) {
     return janet_persimm_next_index(((persimm_vector_t *)p)->count, key);
 }
 
+static size_t janet_persimm_vector_length(void *p, size_t size) {
+    (void) size;
+    return ((persimm_vector_t *)p)->count;
+}
+
 static const JanetAbstractType persimm_vector_type = {
     "persimmon/vector",
     janet_persimm_vector_gc,
@@ -147,7 +152,9 @@ static const JanetAbstractType persimm_vector_type = {
     janet_persimm_compare, /* Compare */
     janet_persimm_vector_hash, /* Hash */
     janet_persimm_vector_next, /* Next */
-    JANET_ATEND_NEXT
+    NULL, /* Call */
+    janet_persimm_vector_length, /* Length */
+    JANET_ATEND_LENGTH
 };
 
 static Janet persimm_vector_method_length(int32_t argc, Janet *argv) {
@@ -223,6 +230,11 @@ static Janet janet_persimm_list_next(void *p, Janet key) {
     return janet_persimm_next_index(((janet_persimm_list_t *)p)->list.count, key);
 }
 
+static size_t janet_persimm_list_length(void *p, size_t size) {
+    (void) size;
+    return ((janet_persimm_list_t *)p)->list.count;
+}
+
 static const JanetAbstractType persimm_list_type = {
     "persimmon/list",
     janet_persimm_list_gc,
@@ -235,7 +247,9 @@ static const JanetAbstractType persimm_list_type = {
     janet_persimm_compare, /* Compare */
     janet_persimm_list_hash, /* Hash */
     janet_persimm_list_next, /* Next */
-    JANET_ATEND_NEXT
+    NULL, /* Call */
+    janet_persimm_list_length, /* Length */
+    JANET_ATEND_LENGTH
 };
 
 static Janet persimm_list_method_length(int32_t argc, Janet *argv) {

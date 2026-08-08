@@ -39,6 +39,16 @@
   (is (== expect (persimmon/to-array vec))))
 
 
+# `length` reads the abstract type's length slot while `:length` goes through
+# the method table. Both are supported and must agree.
+(deftest length-of-a-vector
+  (is (= 0 (length (persimmon/vec))))
+  (is (= 0 (:length (persimmon/vec))))
+  (def vec (persimmon/vec (numbers 1100)))
+  (is (= 1100 (length vec)))
+  (is (= 1100 (:length vec))))
+
+
 (deftest get-with-negative-index
   (def vec (persimmon/vec [:foo :bar :qux]))
   (is (= :qux (get vec -1)))
