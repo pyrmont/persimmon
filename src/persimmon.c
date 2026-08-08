@@ -1,9 +1,61 @@
-#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 #include "persimmon.h"
 
-#define BITS 5
-#define WIDTH (1 << BITS) // 2^5 = 32
-#define MASK (WIDTH - 1) // 31, or 0x1f
+/* Atomics */
+
+/*
+ * Reference counts are manipulated with acquire/release ordering so that a node
+ * dropping to zero on one thread sees every write made through the references
+ * that preceded it. Increments can be relaxed: the caller already holds a
+ * reference, so the node cannot be freed underneath it.
+ */
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+
+#include <stdatomic.h>
+typedef _Atomic size_t persimm_refcount_t;
+#define PERSIMM_RC_ATOMIC 1
+#define PERSIMM_RC_SET(rc, v) atomic_init(&(rc), (size_t)(v))
+#define PERSIMM_RC_LOAD(rc) atomic_load_explicit(&(rc), memory_order_acquire)
+#define PERSIMM_RC_INC(rc) atomic_fetch_add_explicit(&(rc), 1, memory_order_relaxed)
+#define PERSIMM_RC_DEC(rc) atomic_fetch_sub_explicit(&(rc), 1, memory_order_acq_rel)
+
+#elif defined(__GNUC__) || defined(__clang__)
+
+typedef size_t persimm_refcount_t;
+#define PERSIMM_RC_ATOMIC 1
+#define PERSIMM_RC_SET(rc, v) __atomic_store_n(&(rc), (size_t)(v), __ATOMIC_RELAXED)
+#define PERSIMM_RC_LOAD(rc) __atomic_load_n(&(rc), __ATOMIC_ACQUIRE)
+#define PERSIMM_RC_INC(rc) __atomic_fetch_add(&(rc), 1, __ATOMIC_RELAXED)
+#define PERSIMM_RC_DEC(rc) __atomic_fetch_sub(&(rc), 1, __ATOMIC_ACQ_REL)
+
+#elif defined(_WIN32)
+
+#include <windows.h>
+typedef volatile size_t persimm_refcount_t;
+#define PERSIMM_RC_ATOMIC 1
+#define PERSIMM_RC_SET(rc, v) ((rc) = (size_t)(v))
+#if defined(_WIN64)
+#define PERSIMM_RC_LOAD(rc) ((size_t)InterlockedCompareExchange64((volatile LONG64 *)&(rc), 0, 0))
+#define PERSIMM_RC_INC(rc) ((size_t)InterlockedIncrement64((volatile LONG64 *)&(rc)) - 1)
+#define PERSIMM_RC_DEC(rc) ((size_t)InterlockedDecrement64((volatile LONG64 *)&(rc)) + 1)
+#else
+#define PERSIMM_RC_LOAD(rc) ((size_t)InterlockedCompareExchange((volatile LONG *)&(rc), 0, 0))
+#define PERSIMM_RC_INC(rc) ((size_t)InterlockedIncrement((volatile LONG *)&(rc)) - 1)
+#define PERSIMM_RC_DEC(rc) ((size_t)InterlockedDecrement((volatile LONG *)&(rc)) + 1)
+#endif
+
+#else
+
+typedef size_t persimm_refcount_t;
+#define PERSIMM_RC_ATOMIC 0
+#define PERSIMM_RC_SET(rc, v) ((rc) = (size_t)(v))
+#define PERSIMM_RC_LOAD(rc) (rc)
+#define PERSIMM_RC_INC(rc) ((rc)++)
+#define PERSIMM_RC_DEC(rc) ((rc)--)
+
+#endif
 
 /* Types */
 
@@ -12,431 +64,375 @@ typedef enum {
     PERSIMM_NODE_LEAF
 } persimm_node_type;
 
-typedef struct {
+/*
+ * The union is never read from. It exists so that the flexible array member
+ * inherits the widest fundamental alignment, which lets the same allocation
+ * hold either child pointers or arbitrary element bytes.
+ */
+typedef union {
+    long long as_long_long;
+    long double as_long_double;
+    void *as_pointer;
+} persimm_align_t;
+
+struct persimm_node {
     persimm_node_type kind;
-    size_t ref_count;
-    void* items[WIDTH];
-} persimm_node_t;
+    persimm_refcount_t ref_count;
+    persimm_align_t data[];
+};
 
-typedef struct {
-    size_t shift;
-    size_t count;
-    size_t tail_count;
-    persimm_node_t *root;
-    persimm_node_t *tail;
-} persimm_vector_t;
+/* Status Codes */
 
-/* Forward Declarations */
-
-static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immutable);
-static Janet persimm_vector_get_at_index(persimm_vector_t *vector, size_t index);
-
-/* Utility Methods */
-
-static int persimm_vector_index(persimm_vector_t *vector, Janet input, size_t *index) {
-    if (!janet_checktype(input, JANET_NUMBER)) janet_panic("expected index as number");
-
-    int32_t vector_length = (int32_t)vector->count;
-
-    int32_t input_index = janet_unwrap_integer(input);
-    if (janet_unwrap_number(input) - (double)input_index != 0) janet_panic("expected index as integer");
-    if ((vector_length + input_index) < 0 || input_index >= vector_length) return 0;
-
-    *index = (input_index < 0) ? (vector_length + input_index) : input_index;
-    return 1;
-}
-
-static void persimm_vector_seed(persimm_vector_t *vector, Janet coll) {
-    if (janet_checktypes(coll, JANET_TFLAG_INDEXED)) {
-        JanetView view;
-        janet_indexed_view(coll, &view.items, &view.len);
-        for (size_t i = 0; i < (size_t)view.len; i++) {
-            persimm_vector_push(vector, (Janet *)&view.items[i], false);
-        }
-    } else if (janet_checktypes(coll, JANET_TFLAG_DICTIONARY)) {
-        janet_panic("cannot seed with dictionary");
-    } else {
-        janet_panic("cannot seed with this type");
+const char *persimm_status_string(persimm_status status) {
+    switch (status) {
+        case PERSIMM_OK: return "ok";
+        case PERSIMM_ERR_ALLOC: return "out of memory";
+        case PERSIMM_ERR_BOUNDS: return "index out of bounds";
+        case PERSIMM_ERR_INVALID: return "invalid argument";
+        case PERSIMM_ERR_CORRUPT: return "corrupt vector";
+        default: return "unknown error";
     }
 }
 
-/* Deinitilising */
+bool persimm_has_atomic_refcounts(void) {
+    return PERSIMM_RC_ATOMIC ? true : false;
+}
 
-static void persimm_node_free(persimm_node_t *node) {
+/* Element Access */
+
+static persimm_node_t **persimm_node_children(persimm_node_t *node) {
+    return (persimm_node_t **)node->data;
+}
+
+static void *persimm_node_slot(persimm_node_t *node, size_t index, size_t elem_size) {
+    return (unsigned char *)node->data + (index * elem_size);
+}
+
+static void persimm_elem_retain(const persimm_elem_ops *ops, void *ctx, void *slot) {
+    if (NULL != ops && NULL != ops->retain) ops->retain(slot, ctx);
+}
+
+static void persimm_elem_release(const persimm_elem_ops *ops, void *ctx, void *slot) {
+    if (NULL != ops && NULL != ops->release) ops->release(slot, ctx);
+}
+
+/* Deinitialising */
+
+/*
+ * `live` is the number of leaf slots holding elements. Every leaf in the trie
+ * is full by construction, so only the tail is ever partial and only its owner
+ * knows how partial it is.
+ */
+static void persimm_node_release(persimm_node_t *node, size_t live, size_t elem_size,
+                                 const persimm_elem_ops *ops, void *ctx) {
     if (NULL == node) return;
 
-    if (node->ref_count > 1) {
-        node->ref_count -= 1;
-        return;
-    }
+    if (PERSIMM_RC_DEC(node->ref_count) > 1) return;
 
-    // This could be optimised
     if (node->kind == PERSIMM_NODE_INNER) {
-        for (size_t i = 0; i < WIDTH; i++) {
-            if (NULL == node->items[i]) continue;
-            persimm_node_free((persimm_node_t *)node->items[i]);
-            node->items[i] = NULL;
+        persimm_node_t **children = persimm_node_children(node);
+        for (size_t i = 0; i < PERSIMM_WIDTH; i++) {
+            if (NULL == children[i]) continue;
+            persimm_node_release(children[i], PERSIMM_WIDTH, elem_size, ops, ctx);
+            children[i] = NULL;
+        }
+    } else if (NULL != ops && NULL != ops->release) {
+        for (size_t i = 0; i < live; i++) {
+            ops->release(persimm_node_slot(node, i, elem_size), ctx);
         }
     }
 
     free(node);
 }
 
-static void persimm_vector_deinit(persimm_vector_t *vector) {
-    persimm_node_free(vector->root);
-    persimm_node_free(vector->tail);
+void persimm_vector_deinit(persimm_vector_t *vector) {
+    persimm_node_release(vector->root, PERSIMM_WIDTH, vector->elem_size, vector->ops, vector->ctx);
+    persimm_node_release(vector->tail, vector->tail_count, vector->elem_size, vector->ops,
+                         vector->ctx);
+    vector->root = NULL;
+    vector->tail = NULL;
+    vector->count = 0;
+    vector->tail_count = 0;
 }
 
-static int persimm_vector_gc(void *p, size_t size) {
-    (void) size;
-    persimm_vector_t *vector = (persimm_vector_t *)p;
-    persimm_vector_deinit(vector);
-    return 0;
+/* Initialising */
+
+static persimm_node_t *persimm_node_new(persimm_node_type kind, size_t elem_size) {
+    size_t stride = (kind == PERSIMM_NODE_INNER) ? sizeof(persimm_node_t *) : elem_size;
+    persimm_node_t *node = calloc(1, offsetof(struct persimm_node, data) + (PERSIMM_WIDTH * stride));
+    if (NULL == node) return NULL;
+    node->kind = kind;
+    PERSIMM_RC_SET(node->ref_count, 1);
+    return node;
 }
 
-/* Initialising  */
+/*
+ * Returns a node the caller owns exclusively, consuming the reference it passed
+ * in. When that reference was already the only one the node is returned as-is.
+ * Returns NULL, leaving `node` untouched, if the copy could not be allocated.
+ */
+static persimm_node_t *persimm_node_make_unique(persimm_node_t *node, size_t live, size_t elem_size,
+                                                const persimm_elem_ops *ops, void *ctx) {
+    if (PERSIMM_RC_LOAD(node->ref_count) == 1) return node;
 
-static void persimm_vector_clone(persimm_vector_t *old_v, persimm_vector_t *new_v) {
-    new_v->shift = old_v->shift;
-    new_v->count = old_v->count;
-    new_v->tail_count = old_v->tail_count;
-    new_v->root = old_v->root;
-    if (NULL != old_v->root) old_v->root->ref_count++;
-    new_v->tail = old_v->tail;
-    if (NULL != old_v->tail) old_v->tail->ref_count++;
-}
+    persimm_node_t *copy = persimm_node_new(node->kind, elem_size);
+    if (NULL == copy) return NULL;
 
-static persimm_node_t *persimm_vector_copy_node(persimm_node_t *node) {
-    persimm_node_t *copy = malloc(sizeof(persimm_node_t));
-    copy->kind = node->kind;
-    copy->ref_count = 1;
-    for (size_t i = 0; i < WIDTH; i++) {
-        copy->items[i] = node->items[i];
-        if (copy->kind == PERSIMM_NODE_INNER && NULL != copy->items[i]) {
-            ((persimm_node_t *)copy->items[i])->ref_count++;
+    if (node->kind == PERSIMM_NODE_INNER) {
+        persimm_node_t **children = persimm_node_children(node);
+        persimm_node_t **copies = persimm_node_children(copy);
+        for (size_t i = 0; i < PERSIMM_WIDTH; i++) {
+            copies[i] = children[i];
+            if (NULL != copies[i]) PERSIMM_RC_INC(copies[i]->ref_count);
+        }
+    } else {
+        memcpy(copy->data, node->data, PERSIMM_WIDTH * elem_size);
+        for (size_t i = 0; i < live; i++) {
+            persimm_elem_retain(ops, ctx, persimm_node_slot(copy, i, elem_size));
         }
     }
 
-    if (node->ref_count > 1) {
-        node->ref_count--;
-    } else {
-        persimm_node_free(node);
-    }
+    persimm_node_release(node, live, elem_size, ops, ctx);
 
     return copy;
 }
 
-static persimm_node_t *persimm_vector_new_node(persimm_node_type kind) {
-    persimm_node_t *node = malloc(sizeof(persimm_node_t));
-    node->kind = kind;
-    node->ref_count = 1;
-    for (size_t i = 0; i < WIDTH; i++) {
-        node->items[i] = NULL;
-    }
-    return node;
-}
-
-static void persimm_vector_init(persimm_vector_t *vector) {
+persimm_status persimm_vector_init(persimm_vector_t *vector, size_t elem_size,
+                                   const persimm_elem_ops *ops, void *ctx) {
     vector->shift = 0;
     vector->count = 0;
     vector->tail_count = 0;
+    vector->elem_size = elem_size;
+    vector->ops = ops;
+    vector->ctx = ctx;
     vector->root = NULL;
-    vector->tail = persimm_vector_new_node(PERSIMM_NODE_LEAF);
+    vector->tail = NULL;
+
+    if (0 == elem_size) return PERSIMM_ERR_INVALID;
+
+    vector->tail = persimm_node_new(PERSIMM_NODE_LEAF, elem_size);
+    if (NULL == vector->tail) return PERSIMM_ERR_ALLOC;
+
+    return PERSIMM_OK;
 }
 
-/* Marking */
-
-static int persimm_vector_mark(void *p, size_t size) {
-    (void) size;
-    persimm_vector_t *vector = (persimm_vector_t *)p;
-    for (size_t i = 0; i < vector->count; i++) {
-        Janet value = persimm_vector_get_at_index(vector, i);
-        janet_mark(value);
-    }
-    return 0;
+void persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest) {
+    dest->shift = src->shift;
+    dest->count = src->count;
+    dest->tail_count = src->tail_count;
+    dest->elem_size = src->elem_size;
+    dest->ops = src->ops;
+    dest->ctx = src->ctx;
+    dest->root = src->root;
+    if (NULL != dest->root) PERSIMM_RC_INC(dest->root->ref_count);
+    dest->tail = src->tail;
+    if (NULL != dest->tail) PERSIMM_RC_INC(dest->tail->ref_count);
 }
 
 /* Accessing */
 
-static JanetMethod persimm_vector_methods[2];
+void *persimm_vector_ref(const persimm_vector_t *vector, size_t index) {
+    if (index >= vector->count) return NULL;
 
-static Janet persimm_vector_get_at_index(persimm_vector_t *vector, size_t index) {
     size_t tail_offset = vector->count - vector->tail_count;
     if (index >= tail_offset) {
-        return *(Janet *)vector->tail->items[index - tail_offset];
+        return persimm_node_slot(vector->tail, index - tail_offset, vector->elem_size);
     }
 
     persimm_node_t *node = vector->root;
-    for (size_t level = vector->shift; level > 0; level -= BITS) {
-        size_t curr_index = (index >> level) & MASK;
-        if (NULL == node->items[curr_index]) {
-            janet_panic("invalid index");
-        }
-        node = (persimm_node_t *)node->items[curr_index];
+    for (size_t level = vector->shift; level > 0; level -= PERSIMM_BITS) {
+        if (NULL == node) return NULL;
+        node = persimm_node_children(node)[(index >> level) & PERSIMM_MASK];
     }
+    if (NULL == node) return NULL;
 
-    return *(Janet *)node->items[index & MASK];
+    return persimm_node_slot(node, index & PERSIMM_MASK, vector->elem_size);
 }
 
-static int persimm_vector_get(void *p, Janet key, Janet *out) {
-    if (janet_checktype(key, JANET_KEYWORD)) {
-        return janet_getmethod(janet_unwrap_keyword(key), persimm_vector_methods, out);
-    }
-
-    persimm_vector_t *vector = (persimm_vector_t *)p;
-
-    size_t index;
-    if (!persimm_vector_index(vector, key, &index)) return 0;
-
-    Janet val = persimm_vector_get_at_index(vector, index);
-    *out = val;
-    return 1;
+bool persimm_vector_index(const persimm_vector_t *vector, int64_t input, size_t *index) {
+    int64_t length = (int64_t)vector->count;
+    if ((length + input) < 0 || input >= length) return false;
+    *index = (size_t)((input < 0) ? (length + input) : input);
+    return true;
 }
 
 /* Inserting */
 
-static void persimm_vector_push(persimm_vector_t *vector, Janet *item, bool immutable) {
-    if (vector->tail_count < WIDTH) {
-        if (immutable) vector->tail = persimm_vector_copy_node(vector->tail);
-        vector->tail->items[vector->tail_count] = item;
+static void persimm_elem_store(const persimm_vector_t *vector, void *slot, const void *elem) {
+    memcpy(slot, elem, vector->elem_size);
+    persimm_elem_retain(vector->ops, vector->ctx, slot);
+}
+
+/*
+ * Grafts a full tail into the trie, growing the root by one level first if
+ * there is no longer room beneath it. `old_count` is the vector's count before
+ * the push that displaced the tail.
+ */
+static persimm_status persimm_vector_graft(persimm_vector_t *vector, persimm_node_t *tail,
+                                           size_t old_count, bool immutable) {
+    if (old_count == PERSIMM_WIDTH) {
+        vector->root = tail;
+        return PERSIMM_OK;
+    }
+
+    if ((old_count >> PERSIMM_BITS) > ((size_t)1 << vector->shift)) {
+        persimm_node_t *root = persimm_node_new(PERSIMM_NODE_INNER, vector->elem_size);
+        if (NULL == root) return PERSIMM_ERR_ALLOC;
+        persimm_node_children(root)[0] = vector->root;
+        vector->root = root;
+        vector->shift += PERSIMM_BITS;
+    } else if (immutable) {
+        persimm_node_t *root = persimm_node_make_unique(vector->root, PERSIMM_WIDTH,
+                                                        vector->elem_size, vector->ops, vector->ctx);
+        if (NULL == root) return PERSIMM_ERR_ALLOC;
+        vector->root = root;
+    }
+
+    size_t index = old_count - PERSIMM_WIDTH;
+    persimm_node_t *node = vector->root;
+    for (size_t level = vector->shift; level > PERSIMM_BITS; level -= PERSIMM_BITS) {
+        size_t curr_index = (index >> level) & PERSIMM_MASK;
+        persimm_node_t *child = persimm_node_children(node)[curr_index];
+        if (NULL == child) {
+            child = persimm_node_new(PERSIMM_NODE_INNER, vector->elem_size);
+            if (NULL == child) return PERSIMM_ERR_ALLOC;
+        } else if (immutable) {
+            child = persimm_node_make_unique(child, PERSIMM_WIDTH, vector->elem_size, vector->ops,
+                                             vector->ctx);
+            if (NULL == child) return PERSIMM_ERR_ALLOC;
+        }
+        persimm_node_children(node)[curr_index] = child;
+        node = child;
+    }
+    persimm_node_children(node)[(index >> PERSIMM_BITS) & PERSIMM_MASK] = tail;
+
+    return PERSIMM_OK;
+}
+
+persimm_status persimm_vector_push(persimm_vector_t *vector, const void *elem, bool immutable) {
+    if (NULL == vector->tail) return PERSIMM_ERR_CORRUPT;
+
+    if (vector->tail_count < PERSIMM_WIDTH) {
+        if (immutable) {
+            persimm_node_t *tail = persimm_node_make_unique(vector->tail, vector->tail_count,
+                                                            vector->elem_size, vector->ops,
+                                                            vector->ctx);
+            if (NULL == tail) return PERSIMM_ERR_ALLOC;
+            vector->tail = tail;
+        }
+        persimm_elem_store(vector, persimm_node_slot(vector->tail, vector->tail_count,
+                                                     vector->elem_size), elem);
         vector->tail_count++;
         vector->count++;
-        return;
+        return PERSIMM_OK;
     }
+
+    persimm_node_t *tail = persimm_node_new(PERSIMM_NODE_LEAF, vector->elem_size);
+    if (NULL == tail) return PERSIMM_ERR_ALLOC;
 
     persimm_node_t *old_tail = vector->tail;
-    persimm_node_t *new_tail = persimm_vector_new_node(PERSIMM_NODE_LEAF);
-    vector->tail = new_tail;
+    persimm_status status = persimm_vector_graft(vector, old_tail, vector->count, immutable);
+    if (PERSIMM_OK != status) {
+        free(tail);
+        return status;
+    }
+
+    vector->tail = tail;
     vector->tail_count = 0;
-    new_tail->items[vector->tail_count] = item;
-    vector->tail_count++;
+    persimm_elem_store(vector, persimm_node_slot(tail, 0, vector->elem_size), elem);
+    vector->tail_count = 1;
     vector->count++;
 
-    size_t old_count = vector->count - 1;
-    if (old_count == WIDTH) {
-        vector->root = old_tail;
-        return;
-    }
-
-    if ((old_count >> BITS) > (size_t)(1 << vector->shift)) {
-        persimm_node_t *old_root = vector->root;
-        persimm_node_t *new_root = persimm_vector_new_node(PERSIMM_NODE_INNER);
-        vector->shift += BITS;
-        vector->root = new_root;
-        new_root->items[0] = old_root;
-    } else {
-        if (immutable) vector->root = persimm_vector_copy_node(vector->root);
-    }
-
-    size_t index = old_count - WIDTH;
-    persimm_node_t *node = vector->root;
-    for (size_t level = vector->shift; level > BITS; level -= BITS) {
-        size_t curr_index = (index >> level) & MASK;
-        if (NULL == node->items[curr_index]) {
-            node->items[curr_index] = persimm_vector_new_node(PERSIMM_NODE_INNER);
-        }
-        if (immutable) {
-            persimm_node_t *child = (persimm_node_t *)node->items[curr_index];
-            node->items[curr_index] = persimm_vector_copy_node(child);
-        }
-        node = (persimm_node_t *)node->items[curr_index];
-    }
-    node->items[(index >> BITS) & MASK] = old_tail;
+    return PERSIMM_OK;
 }
 
-static void persimm_vector_update(persimm_vector_t *vector, size_t index, Janet *item, bool immutable) {
-    if (index >= (vector->count - vector->tail_count)) {
-        if (immutable) vector->tail = persimm_vector_copy_node(vector->tail);
-        vector->tail->items[index] = item;
-        return;
+persimm_status persimm_vector_update(persimm_vector_t *vector, size_t index, const void *elem,
+                                     bool immutable) {
+    if (index >= vector->count) return PERSIMM_ERR_BOUNDS;
+
+    size_t tail_offset = vector->count - vector->tail_count;
+    if (index >= tail_offset) {
+        if (immutable) {
+            persimm_node_t *tail = persimm_node_make_unique(vector->tail, vector->tail_count,
+                                                            vector->elem_size, vector->ops,
+                                                            vector->ctx);
+            if (NULL == tail) return PERSIMM_ERR_ALLOC;
+            vector->tail = tail;
+        }
+        void *slot = persimm_node_slot(vector->tail, index - tail_offset, vector->elem_size);
+        persimm_elem_release(vector->ops, vector->ctx, slot);
+        persimm_elem_store(vector, slot, elem);
+        return PERSIMM_OK;
     }
 
-    if (immutable) vector->root = persimm_vector_copy_node(vector->root);
+    if (NULL == vector->root) return PERSIMM_ERR_CORRUPT;
+
+    if (immutable) {
+        persimm_node_t *root = persimm_node_make_unique(vector->root, PERSIMM_WIDTH,
+                                                        vector->elem_size, vector->ops, vector->ctx);
+        if (NULL == root) return PERSIMM_ERR_ALLOC;
+        vector->root = root;
+    }
 
     persimm_node_t *node = vector->root;
-    for (size_t level = vector->shift; level > 0; level -= BITS) {
-        size_t curr_index = (index >> level) & MASK;
-        if (NULL == node->items[curr_index]) {
-            node->items[curr_index] = persimm_vector_new_node(PERSIMM_NODE_INNER);
-        }
+    for (size_t level = vector->shift; level > 0; level -= PERSIMM_BITS) {
+        size_t curr_index = (index >> level) & PERSIMM_MASK;
+        persimm_node_t *child = persimm_node_children(node)[curr_index];
+        if (NULL == child) return PERSIMM_ERR_CORRUPT;
         if (immutable) {
-            persimm_node_t *child = (persimm_node_t *)node->items[curr_index];
-            node->items[curr_index] = persimm_vector_copy_node(child);
+            child = persimm_node_make_unique(child, PERSIMM_WIDTH, vector->elem_size, vector->ops,
+                                             vector->ctx);
+            if (NULL == child) return PERSIMM_ERR_ALLOC;
+            persimm_node_children(node)[curr_index] = child;
         }
-        node = (persimm_node_t *)node->items[curr_index];
+        node = child;
     }
-    node->items[index & MASK] = item;
-}
 
-/* Stringifying */
+    void *slot = persimm_node_slot(node, index & PERSIMM_MASK, vector->elem_size);
+    persimm_elem_release(vector->ops, vector->ctx, slot);
+    persimm_elem_store(vector, slot, elem);
 
-static void persimm_vector_to_string(void *p, JanetBuffer *buf) {
-    persimm_vector_t *vector = (persimm_vector_t *)p;
-    janet_buffer_push_cstring(buf, "[");
-    for (size_t i = 0; i < vector->count; i++) {
-        if (i > 0) janet_buffer_push_cstring(buf, " ");
-        Janet val = persimm_vector_get_at_index(vector, i);
-        janet_buffer_push_string(buf, janet_to_string(val));
-    }
-    janet_buffer_push_cstring(buf, "]");
-}
-
-/* Comparing */
-
-static int persimm_vector_compare(void *p1, void *p2) {
-    persimm_vector_t *a = (persimm_vector_t *)p1;
-    persimm_vector_t *b = (persimm_vector_t *)p2;
-    return a == b;
-}
-
-/* Hashing */
-
-static int32_t persimm_vector_hash(void *p, size_t size) {
-    (void) size;
-    persimm_vector_t *vector = (persimm_vector_t *)p;
-    uint32_t hash = 5381;
-    for (size_t i = 0; i < vector->count; i++) {
-        hash = (hash << 5) + hash + janet_hash(persimm_vector_get_at_index(vector, i));
-    }
-    return (int32_t)hash;
+    return PERSIMM_OK;
 }
 
 /* Traversing */
 
-static Janet persimm_vector_next(void *p, Janet key) {
-    persimm_vector_t *vector = (persimm_vector_t *)p;
+static void persimm_node_foreach(persimm_node_t *node, size_t elem_size, size_t *index,
+                                 size_t limit, persimm_visit_fn fn, void *ctx) {
+    if (NULL == node || *index >= limit) return;
 
-    if (janet_checktype(key, JANET_NIL)) {
-        if (vector->count > 0) {
-            return janet_wrap_number(0);
-        } else {
-            return janet_wrap_nil();
+    if (node->kind == PERSIMM_NODE_LEAF) {
+        for (size_t i = 0; i < PERSIMM_WIDTH && *index < limit; i++) {
+            fn(persimm_node_slot(node, i, elem_size), *index, ctx);
+            (*index)++;
         }
+        return;
     }
 
-    if (!janet_checksize(key)) janet_panic("expected size as key");
-    size_t index = (size_t)janet_unwrap_integer(key);
-    index++;
-
-    if (index < vector->count) {
-        return janet_wrap_number((double)index);
-    } else {
-        return janet_wrap_nil();
+    persimm_node_t **children = persimm_node_children(node);
+    for (size_t i = 0; i < PERSIMM_WIDTH && *index < limit; i++) {
+        persimm_node_foreach(children[i], elem_size, index, limit, fn, ctx);
     }
 }
 
-/* Type Definition */
+void persimm_vector_foreach(const persimm_vector_t *vector, persimm_visit_fn fn, void *ctx) {
+    size_t index = 0;
+    size_t tail_offset = vector->count - vector->tail_count;
 
-static const JanetAbstractType persimm_vector_type = {
-    "persimmon/vector",
-    persimm_vector_gc,
-    persimm_vector_mark, /* GC Mark */
-    persimm_vector_get, /* Get */
-    NULL, /* Set */
-    NULL, /* Marshall */
-    NULL, /* Unmarshall */
-    persimm_vector_to_string, /* String */
-    persimm_vector_compare, /* Compare */
-    persimm_vector_hash, /* Hash */
-    persimm_vector_next, /* Next */
-    JANET_ATEND_NEXT
-};
+    persimm_node_foreach(vector->root, vector->elem_size, &index, tail_offset, fn, ctx);
 
-/* C Functions */
-
-static Janet cfun_persimm_vec(int32_t argc, Janet *argv) {
-    janet_arity(argc, 0, 1);
-
-    persimm_vector_t *vector = (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
-    persimm_vector_init(vector);
-
-    if (1 == argc) {
-        persimm_vector_seed(vector, argv[0]);
+    for (size_t i = 0; i < vector->tail_count; i++) {
+        fn(persimm_node_slot(vector->tail, i, vector->elem_size), tail_offset + i, ctx);
     }
-
-    return janet_wrap_abstract(vector);
 }
 
-static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
-    janet_fixarity(argc, 3);
-
-    persimm_vector_t *old_vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
-
-    size_t index;
-    if (!persimm_vector_index(old_vector, argv[1], &index)) janet_panic("index out of bounds");
-
-    Janet *item = malloc(sizeof(Janet));
-    memcpy(item, argv + 2, sizeof(Janet));
-
-    persimm_vector_t *new_vector = (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
-    persimm_vector_clone(old_vector, new_vector);
-
-    persimm_vector_update(new_vector, index, item, true);
-
-    return janet_wrap_abstract(new_vector);
+static void persimm_trace_visit(void *slot, size_t index, void *ctx) {
+    (void) index;
+    const persimm_vector_t *vector = (const persimm_vector_t *)ctx;
+    vector->ops->trace(slot, vector->ctx);
 }
 
-static Janet cfun_persimm_conj(int32_t argc, Janet *argv) {
-    janet_fixarity(argc, 2);
-
-    persimm_vector_t *old_vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
-    persimm_vector_t *new_vector = (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
-    persimm_vector_clone(old_vector, new_vector);
-
-    Janet *item = malloc(sizeof(Janet));
-    memcpy(item, argv + 1, sizeof(Janet));
-
-    persimm_vector_push(new_vector, item, true);
-
-    return janet_wrap_abstract(new_vector);
-}
-
-static Janet cfun_persimm_to_array(int32_t argc, Janet *argv) {
-    janet_fixarity(argc, 1);
-
-    persimm_vector_t *vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
-
-    JanetArray *array = janet_array(vector->count);
-    for (size_t i = 0; i < vector->count; i++) {
-        janet_array_push(array, persimm_vector_get_at_index(vector, i));
-    }
-
-    return janet_wrap_array(array);
-}
-
-static const JanetReg cfuns[] = {
-    {"vec", cfun_persimm_vec, NULL},
-    {"assoc", cfun_persimm_assoc, NULL},
-    {"conj", cfun_persimm_conj, NULL},
-    {"to-array", cfun_persimm_to_array, NULL},
-    {NULL, NULL, NULL}
-};
-
-/* Methods */
-
-static Janet persimm_vector_method_length(int32_t argc, Janet *argv) {
-    janet_fixarity(argc, 1);
-    persimm_vector_t *vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
-    return janet_wrap_number(vector->count);
-}
-
-static JanetMethod persimm_vector_methods[] = {
-    {"length", persimm_vector_method_length},
-    {NULL, NULL}
-};
-
-/* Environment Registration */
-
-void persimm_register_type(JanetTable *env) {
-    (void) env;
-    janet_register_abstract_type(&persimm_vector_type);
-}
-
-void persimm_register_functions(JanetTable *env) {
-    janet_cfuns(env, "persimmon", cfuns);
-}
-
-JANET_MODULE_ENTRY(JanetTable *env) {
-    persimm_register_type(env);
-    persimm_register_functions(env);
+void persimm_vector_trace(const persimm_vector_t *vector) {
+    if (NULL == vector->ops || NULL == vector->ops->trace) return;
+    persimm_vector_foreach(vector, persimm_trace_visit, (void *)vector);
 }
