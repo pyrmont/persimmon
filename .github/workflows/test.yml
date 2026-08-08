@@ -1,0 +1,145 @@
+name: test
+
+on:
+  # '**' is every branch but no tags, so pushing a topic branch is tested
+  # without a release tag triggering a second identical run.
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [ master ]
+
+# Persimmon is a native bundle, so every job builds the module before testing.
+# jeep is not installed on the runners, so the build calls the bundle
+# script's build hook directly.
+
+jobs:
+  # Linux
+  test-linux:
+    name: "Test on Linux"
+    runs-on: ubuntu-latest
+    steps:
+    - name: "checkout project"
+      uses: actions/checkout@v7
+    - name: "find latest version of janet"
+      uses: oprypin/find-latest-tag@v1
+      with:
+        repository: janet-lang/janet
+        releases-only: true
+        prefix: 'v'
+      id: janet-ver
+    - name: "set prefix"
+      run: echo "PREFIX=$GITHUB_WORKSPACE/.janet" >> $GITHUB_ENV
+      shell: bash
+    - name: "set paths"
+      run: |
+        echo "$PREFIX/bin" >> $GITHUB_PATH
+        echo "JANET_HEADERPATH=$PREFIX/include" >> $GITHUB_ENV
+        echo "JANET_BINPATH=$PREFIX/bin" >> $GITHUB_ENV
+        echo "JANET_LIBPATH=$PREFIX/lib" >> $GITHUB_ENV
+        echo "JANET_MANPATH=$PREFIX/man" >> $GITHUB_ENV
+        echo "JANET_PATH=$PREFIX" >> $GITHUB_ENV
+      shell: bash
+    - name: "make directories"
+      run: mkdir -p $PREFIX
+      shell: bash
+    - name: "download janet"
+      run: curl -LO https://github.com/janet-lang/janet/releases/download/${{ steps.janet-ver.outputs.tag }}/janet-${{ steps.janet-ver.outputs.tag }}-linux-x64.tar.gz
+      shell: bash
+    - name: "extract janet"
+      run: tar -xzf janet-${{ steps.janet-ver.outputs.tag }}-linux-x64.tar.gz --strip-components=2 -C $PREFIX
+      shell: bash
+    - name: "build native library"
+      run: janet -e '(import ./bundle) (bundle/build (table :info (-> (slurp `info.jdn`) parse)))'
+      shell: bash
+    - name: "run tests"
+      run: 'for f in test/*.janet; do janet "$f" || { rc=$?; break; }; done; (exit ${rc:-0})'
+      shell: bash
+
+  # macOS
+  test-macos:
+    name: "Test on macOS"
+    runs-on: macos-latest
+    steps:
+    - name: "checkout project"
+      uses: actions/checkout@v7
+    - name: "find latest version of janet"
+      uses: oprypin/find-latest-tag@v1
+      with:
+        repository: janet-lang/janet
+        releases-only: true
+        prefix: 'v'
+      id: janet-ver
+    - name: "set prefix"
+      run: echo "PREFIX=$GITHUB_WORKSPACE/.janet" >> $GITHUB_ENV
+      shell: bash
+    - name: "set paths"
+      run: |
+        echo "$PREFIX/bin" >> $GITHUB_PATH
+        echo "JANET_HEADERPATH=$PREFIX/include" >> $GITHUB_ENV
+        echo "JANET_BINPATH=$PREFIX/bin" >> $GITHUB_ENV
+        echo "JANET_LIBPATH=$PREFIX/lib" >> $GITHUB_ENV
+        echo "JANET_MANPATH=$PREFIX/man" >> $GITHUB_ENV
+        echo "JANET_PATH=$PREFIX" >> $GITHUB_ENV
+      shell: bash
+    - name: "make directories"
+      run: mkdir -p $PREFIX
+      shell: bash
+    - name: "download janet"
+      run: curl -LO https://github.com/janet-lang/janet/releases/download/${{ steps.janet-ver.outputs.tag }}/janet-${{ steps.janet-ver.outputs.tag }}-macos-aarch64.tar.gz
+      shell: bash
+    - name: "extract janet"
+      run: tar -xzf janet-${{ steps.janet-ver.outputs.tag }}-macos-aarch64.tar.gz --strip-components=2 -C $PREFIX
+      shell: bash
+    - name: "build native library"
+      run: janet -e '(import ./bundle) (bundle/build (table :info (-> (slurp `info.jdn`) parse)))'
+      shell: bash
+    - name: "run tests"
+      run: 'for f in test/*.janet; do janet "$f" || { rc=$?; break; }; done; (exit ${rc:-0})'
+      shell: bash
+
+  # Windows
+  test-windows:
+    name: "Test on Windows"
+    runs-on: windows-latest
+    steps:
+    - name: "disable git autocrlf"
+      run: git config --global core.autocrlf false
+      shell: cmd
+    - name: "checkout project"
+      uses: actions/checkout@v7
+    - name: "find latest version of janet"
+      uses: oprypin/find-latest-tag@v1
+      with:
+        repository: janet-lang/janet
+        releases-only: true
+        prefix: 'v'
+      id: janet-ver
+    # The Windows asset drops the leading v from the version, unlike the
+    # tarballs, so the tag is trimmed for the file name but not the path.
+    - name: "download janet"
+      run: |
+        set TAG=${{ steps.janet-ver.outputs.tag }}
+        set TAG_NUM=%TAG:~1%
+        set "URL=https://github.com/janet-lang/janet/releases/download/%TAG%/janet-%TAG_NUM%-windows-x64-installer.msi"
+        curl -fSLo janet.msi %URL%
+      shell: cmd
+    - name: "install janet"
+      run: msiexec /quiet /i janet.msi ALLUSERS=1 /log install.log && type install.log
+      shell: cmd
+    - name: "set janet paths"
+      run: |
+        echo C:\Program Files\Janet\bin>>%GITHUB_PATH%
+        echo JANET_HEADERPATH=C:\Program Files\Janet\C>>%GITHUB_ENV%
+        echo JANET_BINPATH=C:\Program Files\Janet\bin>>%GITHUB_ENV%
+        echo JANET_LIBPATH=C:\Program Files\Janet\C>>%GITHUB_ENV%
+        echo JANET_MANPATH=C:\Program Files\Janet\docs>>%GITHUB_ENV%
+        echo JANET_PATH=C:\Program Files\Janet\Library>>%GITHUB_ENV%
+      shell: cmd
+    # The Janet expression uses backtick strings so that it carries no
+    # double quotes of its own for cmd to swallow.
+    - name: "build native library"
+      run: janet -e "(import ./bundle) (bundle/build (table :info (-> (slurp `info.jdn`) parse)))"
+      shell: cmd
+    - name: "run tests"
+      run: 'for f in test/*.janet; do janet "$f" || { rc=$?; break; }; done; (exit ${rc:-0})'
+      shell: bash

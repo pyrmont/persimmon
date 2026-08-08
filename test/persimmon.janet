@@ -1,5 +1,6 @@
-(import testament :prefix "" :exit true)
-(import ../build/persimmon :as persimmon)
+(use ../deps/testament)
+
+(import ../_build/release/persimmon :as persimmon)
 
 
 (deftest vec-with-no-items

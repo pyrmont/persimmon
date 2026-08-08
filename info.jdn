@@ -1,0 +1,24 @@
+{:name "persimmon"
+ :version "DEVEL"
+ :description "Persistent immutable data structures"
+ :author "Michael Camilleri"
+ :license "MIT"
+ :url "https://github.com/pyrmont/persimmon"
+ :repo "git+https://github.com/pyrmont/persimmon"
+ :dependencies []
+ :vendored [{:name "testament"
+             :url "https://github.com/pyrmont/testament"
+             :prefix "deps/testament"
+             :paths ["lib/testament.janet"
+                     "init.janet"
+                     "LICENSE"]}]
+ :artifacts {:executables []
+             :libraries []
+             :manpages []
+             :natives [{:name "persimmon"
+                        :files ["src/persimmon.c"]
+                        :cflags {:posix ["-std=c99"
+                                         "-Wall"
+                                         "-Wextra"
+                                         "-O3"]}}]
+             :scripts []}}
