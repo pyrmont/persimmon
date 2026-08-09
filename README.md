@@ -167,6 +167,17 @@ A nil value means no entry, as it does for a Janet table, so
 under it. Nil cannot be a key: it is how Janet's iteration protocol says
 "start at the beginning", so a map or set refuses it.
 
+Two structures of the same kind are equal when they hold the same things, so
+`=`, `deep=` and use as a key in a table all work as they do for Janet's own
+collections. Two structures of different kinds are never equal, whatever they
+hold.
+
+A vector and a list compare element by element, which also orders them, so
+sorting either is meaningful. A map and a set carry no order of their own:
+they are equal when they hold the same entries, and the order between two
+that differ is arbitrary and not to be relied on. Equal structures always
+hash alike, so a map may be a key in a table or an element of another set.
+
 ## Development
 
 Persimmon is built with [Jeep][]:

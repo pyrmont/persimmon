@@ -163,4 +163,47 @@
   (is (not (= h1 h2))))
 
 
+# Janet has no separate equality slot for an abstract type, so `=`, `deep=`
+# and use as a table key all arrive through the comparison method.
+(deftest comparing-equivalent-vectors
+  (is (= (persimmon/vec) (persimmon/vec)))
+  (is (= (persimmon/vec [:foo :bar]) (persimmon/vec [:foo :bar])))
+  (is (deep= (persimmon/vec [:foo :bar]) (persimmon/vec [:foo :bar]))))
+
+
+(deftest comparing-different-vectors
+  (is (not (= (persimmon/vec [:foo :bar]) (persimmon/vec [:bar :foo]))))
+  (is (not (= (persimmon/vec [:foo]) (persimmon/vec [:foo :bar])))))
+
+
+(deftest comparing-vectors-across-multiple-levels
+  (def vec1 (persimmon/vec (numbers 1100)))
+  (is (= vec1 (persimmon/vec (numbers 1100))))
+  (is (not (= vec1 (persimmon/assoc vec1 1099 :qux)))))
+
+
+# A vector's elements carry an order, so a vector does too.
+(deftest ordering-vectors
+  (def vecs (sort @[(persimmon/vec [2]) (persimmon/vec [1 9]) (persimmon/vec [1])]))
+  (is (== @[@[1] @[1 9] @[2]] (map |(persimmon/to-array $) vecs))))
+
+
+(deftest comparing-a-vector-with-another-kind-of-structure
+  (is (not (= (persimmon/vec [1]) (persimmon/list [1]))))
+  (is (not (= (persimmon/vec) (persimmon/map))))
+  (is (not (= (persimmon/vec) (persimmon/set)))))
+
+
+(deftest a-vector-as-a-table-key
+  (def t @{})
+  (put t (persimmon/vec [:foo]) :found)
+  (is (= :found (get t (persimmon/vec [:foo]))))
+  (is (= nil (get t (persimmon/vec [:bar])))))
+
+
+(deftest comparing-nested-structures
+  (is (= (persimmon/vec [(persimmon/vec [1])]) (persimmon/vec [(persimmon/vec [1])])))
+  (is (not (= (persimmon/vec [(persimmon/vec [1])]) (persimmon/vec [(persimmon/vec [2])])))))
+
+
 (run-tests!)

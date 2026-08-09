@@ -134,13 +134,48 @@ static void janet_persimm_map_to_table_visit(void *slot, size_t index, void *ctx
     janet_table_put((JanetTable *)ctx, entry->key, entry->value);
 }
 
+/* Comparing */
+
 /*
- * Identity comparison. Ordering distinct structures by address is arbitrary
- * but consistent, which is what the protocol asks for.
+ * Janet has no separate equality slot for an abstract type, so `=`, `deep=`
+ * and use as a table key all come through `compare`, and two structures are
+ * equal exactly when it answers zero.
+ *
+ * It asks one operand to order the pair without first checking that the other
+ * is the same kind of abstract, so every comparison below has to look for
+ * itself. Reading a list as though it were a map would otherwise be a matter
+ * of writing `(= a-map a-list)`.
+ *
+ * Where there is no meaningful order the addresses stand in. That is arbitrary
+ * but answers the same way every time it is asked within a run, which is what
+ * the protocol needs.
  */
-static int janet_persimm_compare(void *p1, void *p2) {
-    if (p1 == p2) return 0;
-    return (p1 < p2) ? -1 : 1;
+
+static int janet_persimm_order_by_address(const void *a, const void *b) {
+    if (a == b) return 0;
+    return (a < b) ? -1 : 1;
+}
+
+static bool janet_persimm_is(void *p, const JanetAbstractType *type) {
+    return janet_abstract_type(p) == type;
+}
+
+/*
+ * Two structures of different kinds are ordered by their type tables, so that
+ * every vector sorts to the same side of every list.
+ */
+static int janet_persimm_order_by_kind(void *other, const JanetAbstractType *type) {
+    return janet_persimm_order_by_address(type, janet_abstract_type(other));
+}
+
+/*
+ * Orders two counts, for the structures whose contents carry no order of their
+ * own. A map or a set that differs from another in what it holds, rather than
+ * how much, falls back to addresses.
+ */
+static int janet_persimm_order_by_count(size_t a, size_t b) {
+    if (a == b) return 0;
+    return (a < b) ? -1 : 1;
 }
 
 /*
@@ -170,6 +205,7 @@ static Janet janet_persimm_next_index(size_t count, Janet key) {
 /* Vectors */
 
 static JanetMethod persimm_vector_methods[2];
+static int janet_persimm_vector_compare(void *p1, void *p2);
 
 static int janet_persimm_vector_gc(void *p, size_t size) {
     (void) size;
@@ -234,13 +270,43 @@ static const JanetAbstractType persimm_vector_type = {
     NULL, /* Marshall */
     NULL, /* Unmarshall */
     janet_persimm_vector_to_string, /* String */
-    janet_persimm_compare, /* Compare */
+    janet_persimm_vector_compare, /* Compare */
     janet_persimm_vector_hash, /* Hash */
     janet_persimm_vector_next, /* Next */
     NULL, /* Call */
     janet_persimm_vector_length, /* Length */
     JANET_ATEND_LENGTH
 };
+
+/*
+ * Element by element, and only then by length, which is the order Janet puts
+ * its own tuples and strings in: [1] before [1 9] before [2].
+ *
+ * Length is the cheaper test and it is tempting to reach for it first, but it
+ * decides a different order. Taking it first would sort [2] before [1 9], as
+ * nothing else in Janet does. Nor can it serve as a quick way out for two
+ * vectors that cannot be equal, because this one function answers both
+ * questions, and which way round the pair goes still rests on the elements
+ * they share.
+ */
+static int janet_persimm_vector_compare(void *p1, void *p2) {
+    if (p1 == p2) return 0;
+    if (!janet_persimm_is(p2, &persimm_vector_type)) {
+        return janet_persimm_order_by_kind(p2, &persimm_vector_type);
+    }
+
+    persimm_vector_t *a = (persimm_vector_t *)p1;
+    persimm_vector_t *b = (persimm_vector_t *)p2;
+    size_t shared = (a->count < b->count) ? a->count : b->count;
+
+    for (size_t i = 0; i < shared; i++) {
+        int order = janet_compare(*(Janet *)persimm_vector_ref(a, i),
+                                  *(Janet *)persimm_vector_ref(b, i));
+        if (0 != order) return order;
+    }
+
+    return janet_persimm_order_by_count(a->count, b->count);
+}
 
 static Janet persimm_vector_method_length(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 1);
@@ -268,6 +334,7 @@ typedef struct {
 } janet_persimm_list_t;
 
 static JanetMethod persimm_list_methods[2];
+static int janet_persimm_list_compare(void *p1, void *p2);
 
 static int janet_persimm_list_gc(void *p, size_t size) {
     (void) size;
@@ -329,13 +396,37 @@ static const JanetAbstractType persimm_list_type = {
     NULL, /* Marshall */
     NULL, /* Unmarshall */
     janet_persimm_list_to_string, /* String */
-    janet_persimm_compare, /* Compare */
+    janet_persimm_list_compare, /* Compare */
     janet_persimm_list_hash, /* Hash */
     janet_persimm_list_next, /* Next */
     NULL, /* Call */
     janet_persimm_list_length, /* Length */
     JANET_ATEND_LENGTH
 };
+
+/*
+ * Element by element, resuming from each list's own cursor so that comparing
+ * two lists costs one step per element rather than walking from the head once
+ * for every index.
+ */
+static int janet_persimm_list_compare(void *p1, void *p2) {
+    if (p1 == p2) return 0;
+    if (!janet_persimm_is(p2, &persimm_list_type)) {
+        return janet_persimm_order_by_kind(p2, &persimm_list_type);
+    }
+
+    janet_persimm_list_t *a = (janet_persimm_list_t *)p1;
+    janet_persimm_list_t *b = (janet_persimm_list_t *)p2;
+    size_t shared = (a->list.count < b->list.count) ? a->list.count : b->list.count;
+
+    for (size_t i = 0; i < shared; i++) {
+        int order = janet_compare(*(Janet *)persimm_list_ref_from(&a->list, &a->cursor, i),
+                                  *(Janet *)persimm_list_ref_from(&b->list, &b->cursor, i));
+        if (0 != order) return order;
+    }
+
+    return janet_persimm_order_by_count(a->list.count, b->list.count);
+}
 
 static Janet persimm_list_method_length(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 1);
@@ -352,6 +443,7 @@ static JanetMethod persimm_list_methods[] = {
 /* Maps */
 
 static JanetMethod persimm_map_methods[2];
+static int janet_persimm_map_compare(void *p1, void *p2);
 
 static int janet_persimm_map_gc(void *p, size_t size) {
     (void) size;
@@ -430,13 +522,47 @@ static const JanetAbstractType persimm_map_type = {
     NULL, /* Marshall */
     NULL, /* Unmarshall */
     janet_persimm_map_to_string, /* String */
-    janet_persimm_compare, /* Compare */
+    janet_persimm_map_compare, /* Compare */
     janet_persimm_map_hash, /* Hash */
     janet_persimm_map_next, /* Next */
     NULL, /* Call */
     janet_persimm_map_length, /* Length */
     JANET_ATEND_LENGTH
 };
+
+/*
+ * A map carries no order of its own, so equality is all this can answer
+ * exactly: the same number of entries, and every key mapped to an equal value.
+ * Two maps that differ fall back to their counts and then to their addresses,
+ * which makes the order between unequal maps one not to rely on.
+ *
+ * The count is taken first here, unlike in a vector, and for the same reason
+ * the vector cannot take it first: with no order among the entries themselves,
+ * an order read off the counts is as good as any other.
+ */
+static int janet_persimm_map_compare(void *p1, void *p2) {
+    if (p1 == p2) return 0;
+    if (!janet_persimm_is(p2, &persimm_map_type)) {
+        return janet_persimm_order_by_kind(p2, &persimm_map_type);
+    }
+
+    persimm_map_t *a = (persimm_map_t *)p1;
+    persimm_map_t *b = (persimm_map_t *)p2;
+    if (a->count != b->count) return janet_persimm_order_by_count(a->count, b->count);
+
+    for (void *entry = persimm_map_next(a, NULL);
+         NULL != entry;
+         entry = persimm_map_next(a, entry)) {
+        janet_persimm_entry_t *pair = (janet_persimm_entry_t *)entry;
+        void *value = persimm_map_ref(b, &pair->key);
+        if (NULL == value) return janet_persimm_order_by_address(p1, p2);
+        if (!janet_equals(pair->value, *(Janet *)value)) {
+            return janet_persimm_order_by_address(p1, p2);
+        }
+    }
+
+    return 0;
+}
 
 static Janet persimm_map_method_length(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 1);
@@ -452,6 +578,7 @@ static JanetMethod persimm_map_methods[] = {
 /* Sets */
 
 static JanetMethod persimm_set_methods[2];
+static int janet_persimm_set_compare(void *p1, void *p2);
 
 static int janet_persimm_set_gc(void *p, size_t size) {
     (void) size;
@@ -524,13 +651,36 @@ static const JanetAbstractType persimm_set_type = {
     NULL, /* Marshall */
     NULL, /* Unmarshall */
     janet_persimm_set_to_string, /* String */
-    janet_persimm_compare, /* Compare */
+    janet_persimm_set_compare, /* Compare */
     janet_persimm_set_hash, /* Hash */
     janet_persimm_set_next, /* Next */
     NULL, /* Call */
     janet_persimm_set_length, /* Length */
     JANET_ATEND_LENGTH
 };
+
+/*
+ * As for a map, and for the same reason: the same number of elements, and
+ * every one of them held by both.
+ */
+static int janet_persimm_set_compare(void *p1, void *p2) {
+    if (p1 == p2) return 0;
+    if (!janet_persimm_is(p2, &persimm_set_type)) {
+        return janet_persimm_order_by_kind(p2, &persimm_set_type);
+    }
+
+    persimm_set_t *a = (persimm_set_t *)p1;
+    persimm_set_t *b = (persimm_set_t *)p2;
+    if (a->count != b->count) return janet_persimm_order_by_count(a->count, b->count);
+
+    for (void *elem = persimm_set_next(a, NULL);
+         NULL != elem;
+         elem = persimm_set_next(a, elem)) {
+        if (!persimm_set_has(b, elem)) return janet_persimm_order_by_address(p1, p2);
+    }
+
+    return 0;
+}
 
 static Janet persimm_set_method_length(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 1);

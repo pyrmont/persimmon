@@ -273,4 +273,49 @@
   (is (= 2198 (get m2 1099))))
 
 
+(deftest comparing-equivalent-maps
+  (is (= (persimmon/map) (persimmon/map)))
+  (is (= (persimmon/map {:a 1 :b 2}) (persimmon/map {:b 2 :a 1})))
+  (is (deep= (persimmon/map {:a 1}) (persimmon/map {:a 1}))))
+
+
+# Equality is what canonical form is worth having for: however two maps came
+# by their entries, holding the same ones makes them the same map.
+(deftest comparing-maps-built-differently
+  (def direct (persimmon/map (pairings 100)))
+  (var grown (persimmon/map))
+  (for i 0 100
+    (set grown (persimmon/assoc grown i (* 2 i))))
+  (var pruned (persimmon/map (pairings 200)))
+  (for i 100 200
+    (set pruned (persimmon/dissoc pruned i)))
+  (is (= direct grown))
+  (is (= direct pruned)))
+
+
+(deftest comparing-different-maps
+  (is (not (= (persimmon/map {:a 1}) (persimmon/map {:a 2}))))
+  (is (not (= (persimmon/map {:a 1}) (persimmon/map {:b 1}))))
+  (is (not (= (persimmon/map {:a 1}) (persimmon/map {:a 1 :b 2})))))
+
+
+(deftest comparing-maps-across-multiple-levels
+  (def map1 (persimmon/map (pairings 1100)))
+  (is (= map1 (persimmon/map (pairings 1100))))
+  (is (not (= map1 (persimmon/assoc map1 1099 :qux))))
+  (is (not (= map1 (persimmon/dissoc map1 1099)))))
+
+
+(deftest comparing-a-map-with-another-kind-of-structure
+  (is (not (= (persimmon/map) (persimmon/set))))
+  (is (not (= (persimmon/map) (persimmon/vec)))))
+
+
+(deftest a-map-as-a-table-key
+  (def t @{})
+  (put t (persimmon/map {:a 1}) :found)
+  (is (= :found (get t (persimmon/map {:a 1}))))
+  (is (= nil (get t (persimmon/map {:a 2})))))
+
+
 (run-tests!)

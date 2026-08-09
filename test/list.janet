@@ -209,4 +209,43 @@
   (is (= nil lst)))
 
 
+(deftest comparing-equivalent-lists
+  (is (= (persimmon/list) (persimmon/list)))
+  (is (= (persimmon/list [:foo :bar]) (persimmon/list [:foo :bar])))
+  (is (deep= (persimmon/list [:foo :bar]) (persimmon/list [:foo :bar]))))
+
+
+(deftest comparing-different-lists
+  (is (not (= (persimmon/list [:foo :bar]) (persimmon/list [:bar :foo]))))
+  (is (not (= (persimmon/list [:foo]) (persimmon/list [:foo :bar])))))
+
+
+(deftest ordering-lists
+  (def lists (sort @[(persimmon/list [2]) (persimmon/list [1 9]) (persimmon/list [1])]))
+  (is (== @[@[1] @[1 9] @[2]] (map |(persimmon/to-array $) lists))))
+
+
+# Comparing two lists resumes from each one's cursor and leaves both moved, so
+# a read after a comparison has to be as good as one before it.
+(deftest comparing-does-not-disturb-a-list
+  (def lst1 (persimmon/list (numbers 100)))
+  (def lst2 (persimmon/list (numbers 100)))
+  (is (= lst1 lst2))
+  (is (= 50 (get lst1 50)))
+  (is (= 50 (get lst2 50)))
+  (is (== (numbers 100) (persimmon/to-array lst1))))
+
+
+(deftest comparing-a-list-with-another-kind-of-structure
+  (is (not (= (persimmon/list [1]) (persimmon/vec [1]))))
+  (is (not (= (persimmon/list) (persimmon/set)))))
+
+
+(deftest a-list-as-a-table-key
+  (def t @{})
+  (put t (persimmon/list [:foo]) :found)
+  (is (= :found (get t (persimmon/list [:foo]))))
+  (is (= nil (get t (persimmon/list [:bar])))))
+
+
 (run-tests!)

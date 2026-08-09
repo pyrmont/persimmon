@@ -222,4 +222,45 @@
   (is (= true (persimmon/has-key? s2 1099))))
 
 
+(deftest comparing-equivalent-sets
+  (is (= (persimmon/set) (persimmon/set)))
+  (is (= (persimmon/set [:a :b]) (persimmon/set [:b :a])))
+  (is (deep= (persimmon/set [:a]) (persimmon/set [:a]))))
+
+
+(deftest comparing-sets-built-differently
+  (def direct (persimmon/set (numbers 100)))
+  (var grown (persimmon/set))
+  (for i 0 100
+    (set grown (persimmon/conj grown i)))
+  (var pruned (persimmon/set (numbers 200)))
+  (for i 100 200
+    (set pruned (persimmon/disj pruned i)))
+  (is (= direct grown))
+  (is (= direct pruned)))
+
+
+(deftest comparing-different-sets
+  (is (not (= (persimmon/set [:a :b]) (persimmon/set [:a :c]))))
+  (is (not (= (persimmon/set [:a]) (persimmon/set [:a :b])))))
+
+
+(deftest comparing-sets-across-multiple-levels
+  (def set1 (persimmon/set (numbers 1100)))
+  (is (= set1 (persimmon/set (numbers 1100))))
+  (is (not (= set1 (persimmon/disj set1 1099)))))
+
+
+(deftest comparing-a-set-with-another-kind-of-structure
+  (is (not (= (persimmon/set) (persimmon/map))))
+  (is (not (= (persimmon/set) (persimmon/list)))))
+
+
+(deftest a-set-as-a-table-key
+  (def t @{})
+  (put t (persimmon/set [:a]) :found)
+  (is (= :found (get t (persimmon/set [:a]))))
+  (is (= nil (get t (persimmon/set [:b])))))
+
+
 (run-tests!)
