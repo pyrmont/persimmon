@@ -85,7 +85,8 @@ it persistent consumes it, and any later attempt to use it is an error:
 
 The `!` operations return the transient they receive. Transients support
 `length`, `get`, being called and iteration while active, but cannot be
-compared, hashed or marshalled. Lists have no transient form: consing already costs one new cell
+compared, hashed or marshalled. A transient divides in the operator position
+as its persistent collection does. Lists have no transient form: consing already costs one new cell
 and never copies the chain it shares.
 
 Every structure supports `length`, `get`, `next` and so the whole of Janet's
@@ -109,11 +110,25 @@ something up in itself:
 (map m1 [:foo :bar])         # -> @[1 2]
 ```
 
-A miss answers with the second argument, or with nil where there is none, which
-is what `get` does. Janet's own indexed types raise instead when called outside
-their range; a set that raised at the first element it did not hold could not
-be a predicate at all. Where a miss should be an error, `(in coll key)` remains
-the strict form.
+Calling a structure is `in`, exactly as it is for Janet's own structures: one
+argument, and the same answer. An index outside a vector or a list is a bad
+key there and raises, as it does for a tuple, so `(v1 9)` is an error where
+`(get v1 9)` is nil. A key a map or a set does not hold is merely absent and
+answers nil, as it does for a struct, which is what lets a set be used as a
+predicate.
+
+A bad index raises the message Janet raises for its own indexed types, naming
+the range the structure accepts, which takes in the negative indices Janet's
+own types do not:
+
+```janet
+(v1 9)  # error: expected integer key for persimmon/vector in range [-2, 2), got 9
+([1 2] 9)  # error: expected integer key for tuple in range [0, 2), got 9
+```
+
+Reading the same structure through `in` rather than calling it raises the
+message Janet gives for any abstract, `key 9 not found in …`, which no binding
+can replace.
 
 Iterating a map or a set goes through the same `next` every Janet dictionary
 uses, so `keys`, `values`, `pairs` and `each` all work as they do on a table.

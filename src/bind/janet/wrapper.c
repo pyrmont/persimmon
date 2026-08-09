@@ -348,24 +348,43 @@ static Janet janet_persimm_next_index(size_t count, Janet key) {
  * one can stand where a function is wanted: `(filter a-set xs)` keeps the
  * elements the set holds, and `(map a-map ks)` reads a value for each key.
  *
- * A miss answers with the second argument, or with nil where there is none.
- * That is what `get` does, and not what Janet's own indexed types do when
- * called, which is to raise: a set that raised at the first element it did not
- * hold could not be a predicate at all. `in` remains the strict form for those
- * who want a miss to be an error.
+ * Janet's own structures take exactly one argument there and answer as `in`
+ * does, and these do the same, which divides the two kinds as it divides
+ * Janet's. A key a map or a set does not hold is merely absent and answers
+ * nil, as it does for a struct, which is what lets a set be a predicate: one
+ * that raised at the first element it did not hold could not be used as one.
+ * An index outside a vector or a list is a bad key and raises, as it does for
+ * a tuple.
  *
- * Each structure is asked through its own `get`, so calling one answers
- * exactly as reading it does, down to a map preferring a key it holds to a
- * method of the same name.
+ * A map and a set can therefore ask `get` and be done with it. A vector and a
+ * list cannot ask `in`, because the message it raises for an abstract names no
+ * range and reads as a dictionary miss. They look the key up themselves so
+ * that the one message Janet gives for a bad index, whatever is wrong with it,
+ * can be given here too. The range that message names takes in the negative
+ * indices the wrapper accepts and Janet's own types do not.
  */
-static Janet janet_persimm_call(void *p, int32_t argc, Janet *argv,
-                                int (*get)(void *, Janet, Janet *)) {
-    janet_arity(argc, 1, 2);
+static Janet janet_persimm_call_get(void *p, int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 1);
+    return janet_get(janet_wrap_abstract(p), argv[0]);
+}
 
+static Janet janet_persimm_call_indexed(void *p, Janet key, size_t count,
+                                        const JanetMethod *methods,
+                                        int (*get)(void *, Janet, Janet *)) {
     Janet out;
-    if (get(p, argv[0], &out)) return out;
 
-    return (argc > 1) ? argv[1] : janet_wrap_nil();
+    if (janet_checktype(key, JANET_KEYWORD)) {
+        if (NULL != methods && janet_getmethod(janet_unwrap_keyword(key), methods, &out)) {
+            return out;
+        }
+    /* An integer is never a key janet_persimm_index refuses, so `get` reaches
+       the lookup itself and answers falsely only for one out of range. */
+    } else if (janet_checkint(key) && get(p, key, &out)) {
+        return out;
+    }
+
+    janet_panicf("expected integer key for %s in range [%d, %d), got %v",
+                 janet_abstract_type(p)->name, -(int)count, (int)count, key);
 }
 
 /* Vectors */
@@ -425,7 +444,9 @@ static Janet janet_persimm_vector_next(void *p, Janet key) {
 }
 
 static Janet janet_persimm_vector_call(void *p, int32_t argc, Janet *argv) {
-    return janet_persimm_call(p, argc, argv, janet_persimm_vector_get);
+    janet_fixarity(argc, 1);
+    return janet_persimm_call_indexed(p, argv[0], ((persimm_vector_t *)p)->count,
+                                      persimm_vector_methods, janet_persimm_vector_get);
 }
 
 static size_t janet_persimm_vector_length(void *p, size_t size) {
@@ -582,7 +603,9 @@ static Janet janet_persimm_list_next(void *p, Janet key) {
 }
 
 static Janet janet_persimm_list_call(void *p, int32_t argc, Janet *argv) {
-    return janet_persimm_call(p, argc, argv, janet_persimm_list_get);
+    janet_fixarity(argc, 1);
+    return janet_persimm_call_indexed(p, argv[0], ((janet_persimm_list_t *)p)->list.count,
+                                      persimm_list_methods, janet_persimm_list_get);
 }
 
 static size_t janet_persimm_list_length(void *p, size_t size) {
@@ -756,10 +779,6 @@ static Janet janet_persimm_map_next(void *p, Janet key) {
     return ((const janet_persimm_entry_t *)entry)->key;
 }
 
-static Janet janet_persimm_map_call(void *p, int32_t argc, Janet *argv) {
-    return janet_persimm_call(p, argc, argv, janet_persimm_map_get);
-}
-
 static size_t janet_persimm_map_length(void *p, size_t size) {
     (void) size;
     return ((persimm_map_t *)p)->count;
@@ -777,7 +796,7 @@ static const JanetAbstractType persimm_map_type = {
     janet_persimm_map_compare, /* Compare */
     janet_persimm_map_hash, /* Hash */
     janet_persimm_map_next, /* Next */
-    janet_persimm_map_call, /* Call */
+    janet_persimm_call_get, /* Call */
     janet_persimm_map_length, /* Length */
     JANET_ATEND_LENGTH
 };
@@ -920,10 +939,6 @@ static Janet janet_persimm_set_next(void *p, Janet key) {
     return *(const Janet *)elem;
 }
 
-static Janet janet_persimm_set_call(void *p, int32_t argc, Janet *argv) {
-    return janet_persimm_call(p, argc, argv, janet_persimm_set_get);
-}
-
 static size_t janet_persimm_set_length(void *p, size_t size) {
     (void) size;
     return ((persimm_set_t *)p)->count;
@@ -941,7 +956,7 @@ static const JanetAbstractType persimm_set_type = {
     janet_persimm_set_compare, /* Compare */
     janet_persimm_set_hash, /* Hash */
     janet_persimm_set_next, /* Next */
-    janet_persimm_set_call, /* Call */
+    janet_persimm_call_get, /* Call */
     janet_persimm_set_length, /* Length */
     JANET_ATEND_LENGTH
 };
@@ -1049,8 +1064,14 @@ static Janet janet_persimm_vector_transient_next(void *p, Janet key) {
     return janet_persimm_next_index(transient->value.count, key);
 }
 
+/* A transient has no method table, and the active check comes first so that a
+   spent one says so rather than naming a range it no longer has. */
 static Janet janet_persimm_vector_transient_call(void *p, int32_t argc, Janet *argv) {
-    return janet_persimm_call(p, argc, argv, janet_persimm_vector_transient_get);
+    janet_fixarity(argc, 1);
+    persimm_vector_transient_t *transient = (persimm_vector_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    return janet_persimm_call_indexed(p, argv[0], transient->value.count, NULL,
+                                      janet_persimm_vector_transient_get);
 }
 
 static size_t janet_persimm_vector_transient_length(void *p, size_t size) {
@@ -1111,10 +1132,6 @@ static Janet janet_persimm_map_transient_next(void *p, Janet key) {
                            : ((const janet_persimm_entry_t *)entry)->key;
 }
 
-static Janet janet_persimm_map_transient_call(void *p, int32_t argc, Janet *argv) {
-    return janet_persimm_call(p, argc, argv, janet_persimm_map_transient_get);
-}
-
 static size_t janet_persimm_map_transient_length(void *p, size_t size) {
     (void) size;
     persimm_map_transient_t *transient = (persimm_map_transient_t *)p;
@@ -1134,7 +1151,7 @@ static const JanetAbstractType persimm_map_transient_type = {
     janet_persimm_transient_compare, /* Compare */
     janet_persimm_transient_hash, /* Hash */
     janet_persimm_map_transient_next, /* Next */
-    janet_persimm_map_transient_call, /* Call */
+    janet_persimm_call_get, /* Call */
     janet_persimm_map_transient_length, /* Length */
     JANET_ATEND_LENGTH
 };
@@ -1172,10 +1189,6 @@ static Janet janet_persimm_set_transient_next(void *p, Janet key) {
     return (NULL == elem) ? janet_wrap_nil() : *(const Janet *)elem;
 }
 
-static Janet janet_persimm_set_transient_call(void *p, int32_t argc, Janet *argv) {
-    return janet_persimm_call(p, argc, argv, janet_persimm_set_transient_get);
-}
-
 static size_t janet_persimm_set_transient_length(void *p, size_t size) {
     (void) size;
     persimm_set_transient_t *transient = (persimm_set_transient_t *)p;
@@ -1195,7 +1208,7 @@ static const JanetAbstractType persimm_set_transient_type = {
     janet_persimm_transient_compare, /* Compare */
     janet_persimm_transient_hash, /* Hash */
     janet_persimm_set_transient_next, /* Next */
-    janet_persimm_set_transient_call, /* Call */
+    janet_persimm_call_get, /* Call */
     janet_persimm_set_transient_length, /* Length */
     JANET_ATEND_LENGTH
 };

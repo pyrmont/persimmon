@@ -99,21 +99,36 @@
   (is (= nil (get vec 2)))
   (is (= nil (get vec 2147483647))))
 
-# A structure in the operator position answers as get does, rather than as
-# Janet's own indexed types do when called, which is to raise.
+# A structure in the operator position answers as in does, so an index outside
+# a vector is a bad key there and raises, where get answers nil.
 (deftest calling-a-vector
   (def vec (persimmon/vec :foo :bar))
   (is (= :foo (vec 0)))
   (is (= :bar (vec -1)))
-  (is (= nil (vec 2)))
-  (is (= :fallback (vec 2 :fallback)))
-  (is (= :foo (vec 0 :fallback)))
+  (is (thrown? (vec 2)))
+  (is (= nil (get vec 2)))
   (is (== @[:foo :bar] (map vec [0 1]))))
 
+# A bad key raises the one message Janet gives for its own indexed types,
+# whatever is wrong with the key, naming the range this vector accepts.
+(deftest calling-a-vector-with-a-bad-key
+  (def vec (persimmon/vec :foo :bar))
+  (defn message [key]
+    (def [ok err] (protect (vec key)))
+    (is (= false ok))
+    (string err))
+  (def expect "expected integer key for persimmon/vector in range [-2, 2), got ")
+  (is (= (string expect "2") (message 2)))
+  (is (= (string expect "-3") (message -3)))
+  (is (= (string expect "nil") (message nil)))
+  (is (= (string expect "0.5") (message 0.5)))
+  (is (= (string expect ":bogus") (message :bogus))))
+
+# Janet's own structures take exactly one argument in that position.
 (deftest calling-a-vector-with-the-wrong-number-of-arguments
   (def vec (persimmon/vec :foo))
   (is (thrown? (vec)))
-  (is (thrown? (vec 0 :fallback :extra))))
+  (is (thrown? (vec 0 :fallback))))
 
 (deftest conj-with-vector-with-space-in-tail
   (def vec1 (persimmon/vec :foo :bar))

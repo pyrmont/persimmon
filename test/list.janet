@@ -118,14 +118,20 @@
   (def lst (persimmon/list :foo :bar))
   (is (= :foo (lst 0)))
   (is (= :bar (lst -1)))
-  (is (= nil (lst 2)))
-  (is (= :fallback (lst 2 :fallback)))
+  (is (thrown? (lst 2)))
+  (is (= nil (get lst 2)))
   (is (== @[:foo :bar] (map lst [0 1]))))
+
+(deftest calling-a-list-with-a-bad-key
+  (def lst (persimmon/list :foo :bar))
+  (def [ok err] (protect (lst 2)))
+  (is (= false ok))
+  (is (= "expected integer key for persimmon/list in range [-2, 2), got 2" (string err))))
 
 (deftest calling-a-list-with-the-wrong-number-of-arguments
   (def lst (persimmon/list :foo))
   (is (thrown? (lst)))
-  (is (thrown? (lst 0 :fallback :extra))))
+  (is (thrown? (lst 0 :fallback))))
 
 (deftest next-with-empty-list
   (is (= nil (next (persimmon/list)))))

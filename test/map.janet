@@ -117,22 +117,21 @@
   (is (= nil (get m nil)))
   (is (= :fallback (get m :b :fallback))))
 
-# A map in the operator position answers as get does, so a missing key is nil
-# rather than an error and a key it holds still comes before a method.
+# A key a map does not hold is absent rather than bad, so a map in the
+# operator position answers nil as a struct does. A key it holds still comes
+# before a method of the same name.
 (deftest calling-a-map
   (def m (persimmon/map :a 1))
   (is (= 1 (m :a)))
   (is (= nil (m :b)))
   (is (= nil (m nil)))
-  (is (= :fallback (m :b :fallback)))
-  (is (= 1 (m :a :fallback)))
   (is (= 99 ((persimmon/map :length 99) :length)))
   (is (== @[1 nil] (map m [:a :b]))))
 
 (deftest calling-a-map-with-the-wrong-number-of-arguments
   (def m (persimmon/map :a 1))
   (is (thrown? (m)))
-  (is (thrown? (m :a :fallback :extra))))
+  (is (thrown? (m :a :fallback))))
 
 (deftest assoc-with-a-new-key
   (def m1 (persimmon/map :a 1))

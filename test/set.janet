@@ -89,14 +89,12 @@
   (is (= :a (s :a)))
   (is (= nil (s :c)))
   (is (= nil (s nil)))
-  (is (= false (s :c false)))
-  (is (= :a (s :a false)))
   (is (== @[:a :b] (filter s [:a :c :b]))))
 
 (deftest calling-a-set-with-the-wrong-number-of-arguments
   (def s (persimmon/set :a))
   (is (thrown? (s)))
-  (is (thrown? (s :a false :extra))))
+  (is (thrown? (s :a false))))
 
 (deftest conj-with-a-new-element
   (def s1 (persimmon/set :a))
