@@ -318,4 +318,37 @@
   (is (= nil (get t (persimmon/map {:a 2})))))
 
 
+(deftest marshalling-a-map
+  (def map1 (persimmon/map {:a 1 :b 2}))
+  (def map2 (unmarshal (marshal map1)))
+  (is (= map1 map2))
+  (is (= 1 (get map2 :a)))
+  (is (== @{:a 1 :b 2} (persimmon/to-table map2))))
+
+
+(deftest marshalling-an-empty-map
+  (is (= (persimmon/map) (unmarshal (marshal (persimmon/map)))))
+  (is (= 0 (length (unmarshal (marshal (persimmon/map)))))))
+
+
+# A map is kept canonical, so one read back holds its entries in the order the
+# one written out held them, and hashes the same.
+(deftest marshalling-a-map-across-multiple-levels
+  (def map1 (persimmon/map (pairings 1100)))
+  (def map2 (unmarshal (marshal map1)))
+  (is (= map1 map2))
+  (is (= (hash map1) (hash map2)))
+  (is (== (keys map1) (keys map2)))
+  (is (== (pairings 1100) (persimmon/to-table map2))))
+
+
+# Reading a map back holds each key while its value is read, or the collector
+# would be free to take the key before the entry is stored.
+(deftest a-map-read-back-survives-a-collection
+  (def m (unmarshal (marshal (persimmon/map (pairings 1100)))))
+  (gccollect)
+  (is (= 1100 (length m)))
+  (is (== (pairings 1100) (persimmon/to-table m))))
+
+
 (run-tests!)

@@ -48,12 +48,16 @@ two share their whole implementation.
 
 ## Structure
 
-The library is in two layers.
+The library is in two layers, and the directories say which is which.
 
-Everything but `src/persimmon_janet.c` is the core, and knows nothing about
-any host language. Its elements are opaque blobs of a fixed size, stored
-inline in the structure, and it delegates their lifecycle to a table of
-callbacks the host supplies:
+```
+src/                    the core, which knows no host language
+wrappers/janet/         the Janet wrapper
+```
+
+Everything under `src` is the core. Its elements are opaque blobs of a fixed
+size, stored inline in the structure, and it delegates their lifecycle to a
+table of callbacks the host supplies:
 
 ```c
 typedef struct {
@@ -67,9 +71,10 @@ A host that reference counts fills in `retain` and `release`; a host with a
 tracing collector fills in `trace`; a host storing plain data passes NULL and
 pays for none of it.
 
-`src/persimmon_janet.c` is the Janet binding and the reference implementation
-of that interface. It stores `Janet` values inline, leaves `retain` and
-`release` NULL, and traces through `janet_mark`.
+`wrappers/janet` holds the Janet wrapper, which is the reference
+implementation of that interface. It stores `Janet` values inline, leaves
+`retain` and `release` NULL, and traces through `janet_mark`. A wrapper for
+another language would sit beside it, and nothing in `src` would change.
 
 Node and cell reference counts are atomic wherever the toolchain provides
 atomics, whether through C11 `<stdatomic.h>`, the GCC and Clang builtins, or
@@ -177,6 +182,16 @@ sorting either is meaningful. A map and a set carry no order of their own:
 they are equal when they hold the same entries, and the order between two
 that differ is arbitrary and not to be relied on. Equal structures always
 hash alike, so a map may be a key in a table or an element of another set.
+
+Every structure can be marshalled, and so written to a file or sent to
+another thread. What is written is the contents rather than the shape, and
+what comes back is built from those, which is enough to give back what went
+in: a map read back holds its entries in the order the original held them,
+and hashes the same. Reading one back needs the module to have been loaded,
+since that is what registers the type its name refers to.
+
+Marshalling copies. Two threads that exchange a structure hold one each and
+share nothing, so neither has to wait on the other.
 
 ## Development
 

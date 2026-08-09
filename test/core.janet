@@ -24,14 +24,14 @@
 
 (defn- sources
   ``Reads the core's source files out of the info file, so that adding one to
-    the build cannot leave it untested. The Janet binding is the one file the
-    core tests must not be linked against.``
+    the build cannot leave it untested. The core is what lives under src; a
+    wrapper is written against a host language and must not be linked in.``
   []
   (def info (-> (path "info.jdn") slurp parse))
   (def natives (get-in info [:artifacts :natives] []))
   (seq [nat :in natives
         file :in (get nat :files [])
-        :when (not (string/find "janet" file))]
+        :when (string/has-prefix? "src/" file)]
     (path file)))
 
 (defn- runnable?

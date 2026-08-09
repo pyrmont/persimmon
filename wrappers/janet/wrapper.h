@@ -1,5 +1,5 @@
-#ifndef PERSIMMON_JANET_H
-#define PERSIMMON_JANET_H
+#ifndef PERSIMMON_JANET_WRAPPER_H
+#define PERSIMMON_JANET_WRAPPER_H
 
 #include <janet.h>
 

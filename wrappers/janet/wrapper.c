@@ -1,5 +1,8 @@
-#include "persimmon_janet.h"
-#include "persimmon.h"
+#include "wrapper.h"
+/* The core sits beside this wrapper rather than on an include path, so it is
+   named by where it is. A wrapper is bound to this layout in any case: it
+   exists only to bind this library and cannot be lifted out on its own. */
+#include "../../src/persimmon.h"
 
 /*
  * The Janet binding. Elements are Janet values stored inline, so no reference
@@ -64,6 +67,15 @@ static const persimm_key_ops janet_persimm_key_ops = {
 
 static void janet_persimm_check(persimm_status status) {
     if (PERSIMM_OK != status) janet_panic(persimm_status_string(status));
+}
+
+/*
+ * A nil key can never be looked up again, because nil is how Janet's iteration
+ * protocol says "start from the beginning", so it is refused rather than
+ * quietly stored.
+ */
+static void janet_persimm_check_key(Janet key) {
+    if (janet_checktype(key, JANET_NIL)) janet_panic("expected a key, got nil");
 }
 
 static int64_t janet_persimm_integer(Janet input) {
@@ -132,6 +144,75 @@ static void janet_persimm_map_to_table_visit(void *slot, size_t index, void *ctx
     (void) index;
     janet_persimm_entry_t *entry = (janet_persimm_entry_t *)slot;
     janet_table_put((JanetTable *)ctx, entry->key, entry->value);
+}
+
+/* Marshalling */
+
+/*
+ * A structure is written out as its contents and not as its shape: a count,
+ * and then the elements. What comes back is built from those the way any other
+ * structure is built, which is enough to give back what went in. A vector's
+ * shape follows from its length, a list's from its elements, and a map or a
+ * set is kept canonical, so one rebuilt from its entries has the shape the
+ * original had.
+ *
+ * Marshalling copies. Two virtual machines that exchange a structure hold one
+ * each, sharing no node and no cursor, so nothing here has to be safe to touch
+ * from two of them at once.
+ *
+ * A structure can only be read back where the module has been loaded, since
+ * that is what registers the abstract type its name refers to.
+ */
+
+/*
+ * A value read back is held by the structure being built before the next one
+ * is read, because a Janet in a local is invisible to the collector and
+ * reading the next value may allocate and so collect. Nothing is gathered on
+ * the side: a temporary would have to be a collector root, and a value that
+ * cannot be read would leave that root behind for good.
+ *
+ * Building a structure allocates nothing Janet knows about, so no collection
+ * can run partway through one.
+ */
+
+static void janet_persimm_marshal_visit(void *slot, size_t index, void *ctx) {
+    (void) index;
+    janet_marshal_janet((JanetMarshalContext *)ctx, *(Janet *)slot);
+}
+
+static void janet_persimm_map_marshal_visit(void *slot, size_t index, void *ctx) {
+    (void) index;
+    janet_persimm_entry_t *entry = (janet_persimm_entry_t *)slot;
+    janet_marshal_janet((JanetMarshalContext *)ctx, entry->key);
+    janet_marshal_janet((JanetMarshalContext *)ctx, entry->value);
+}
+
+/*
+ * Turns a chain around. Consing puts elements on the front, so a list read
+ * back in the order it was written comes out reversed and has to be built once
+ * more the other way.
+ */
+typedef struct {
+    persimm_list_t *into;
+    persimm_status status;
+} janet_persimm_reverse_t;
+
+static void janet_persimm_reverse_visit(void *slot, size_t index, void *ctx) {
+    (void) index;
+    janet_persimm_reverse_t *state = (janet_persimm_reverse_t *)ctx;
+    if (PERSIMM_OK != state->status) return;
+    state->status = persimm_list_cons(state->into, slot);
+}
+
+/*
+ * Refuses a length the input cannot mean before anything is read on the
+ * strength of it. What remains of an over-long one fails when the value that
+ * is not there is asked for.
+ */
+static size_t janet_persimm_unmarshal_count(JanetMarshalContext *ctx) {
+    size_t count = janet_unmarshal_size(ctx);
+    if (count > (size_t)INT32_MAX) janet_panic("structure is too long to read back");
+    return count;
 }
 
 /* Comparing */
@@ -206,6 +287,8 @@ static Janet janet_persimm_next_index(size_t count, Janet key) {
 
 static JanetMethod persimm_vector_methods[2];
 static int janet_persimm_vector_compare(void *p1, void *p2);
+static void janet_persimm_vector_marshal(void *p, JanetMarshalContext *ctx);
+static void *janet_persimm_vector_unmarshal(JanetMarshalContext *ctx);
 
 static int janet_persimm_vector_gc(void *p, size_t size) {
     (void) size;
@@ -267,8 +350,8 @@ static const JanetAbstractType persimm_vector_type = {
     janet_persimm_vector_mark, /* GC Mark */
     janet_persimm_vector_get, /* Get */
     NULL, /* Set */
-    NULL, /* Marshall */
-    NULL, /* Unmarshall */
+    janet_persimm_vector_marshal, /* Marshall */
+    janet_persimm_vector_unmarshal, /* Unmarshall */
     janet_persimm_vector_to_string, /* String */
     janet_persimm_vector_compare, /* Compare */
     janet_persimm_vector_hash, /* Hash */
@@ -308,6 +391,29 @@ static int janet_persimm_vector_compare(void *p1, void *p2) {
     return janet_persimm_order_by_count(a->count, b->count);
 }
 
+static void janet_persimm_vector_marshal(void *p, JanetMarshalContext *ctx) {
+    persimm_vector_t *vector = (persimm_vector_t *)p;
+    janet_marshal_abstract(ctx, p);
+    janet_marshal_size(ctx, vector->count);
+    persimm_vector_foreach(vector, janet_persimm_marshal_visit, ctx);
+}
+
+static void *janet_persimm_vector_unmarshal(JanetMarshalContext *ctx) {
+    persimm_vector_t *vector =
+        (persimm_vector_t *)janet_unmarshal_abstract(ctx, sizeof(persimm_vector_t));
+    /* Nothing allocates between the vector coming into existence and its being
+       initialised, so a collection never meets one it cannot trace. */
+    janet_persimm_check(persimm_vector_init(vector, sizeof(Janet), &janet_persimm_ops, NULL));
+
+    size_t count = janet_persimm_unmarshal_count(ctx);
+    for (size_t i = 0; i < count; i++) {
+        Janet value = janet_unmarshal_janet(ctx);
+        janet_persimm_check(persimm_vector_push(vector, &value, false));
+    }
+
+    return vector;
+}
+
 static Janet persimm_vector_method_length(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 1);
     persimm_vector_t *vector = (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
@@ -325,8 +431,10 @@ static JanetMethod persimm_vector_methods[] = {
  * Each list carries a cursor so that `get` can resume where it last stopped.
  * Janet iterates an abstract by asking `next` for a key and then `get` to
  * resolve it, which without a cursor would walk the chain from the head once
- * per element. Nothing here needs a lock: a list has no marshaller, so it
- * cannot reach a second Janet VM, and it never changes once handed out.
+ * per element. Nothing here needs a lock. A list never changes once handed
+ * out, and although one can now be marshalled, what is written out is its
+ * elements: reading it back builds a chain and a cursor of its own, so no two
+ * virtual machines ever hold the same list.
  */
 typedef struct {
     persimm_list_t list;
@@ -335,6 +443,8 @@ typedef struct {
 
 static JanetMethod persimm_list_methods[2];
 static int janet_persimm_list_compare(void *p1, void *p2);
+static void janet_persimm_list_marshal(void *p, JanetMarshalContext *ctx);
+static void *janet_persimm_list_unmarshal(JanetMarshalContext *ctx);
 
 static int janet_persimm_list_gc(void *p, size_t size) {
     (void) size;
@@ -393,8 +503,8 @@ static const JanetAbstractType persimm_list_type = {
     janet_persimm_list_mark, /* GC Mark */
     janet_persimm_list_get, /* Get */
     NULL, /* Set */
-    NULL, /* Marshall */
-    NULL, /* Unmarshall */
+    janet_persimm_list_marshal, /* Marshall */
+    janet_persimm_list_unmarshal, /* Unmarshall */
     janet_persimm_list_to_string, /* String */
     janet_persimm_list_compare, /* Compare */
     janet_persimm_list_hash, /* Hash */
@@ -428,6 +538,48 @@ static int janet_persimm_list_compare(void *p1, void *p2) {
     return janet_persimm_order_by_count(a->list.count, b->list.count);
 }
 
+static void janet_persimm_list_marshal(void *p, JanetMarshalContext *ctx) {
+    janet_persimm_list_t *wrapper = (janet_persimm_list_t *)p;
+    janet_marshal_abstract(ctx, p);
+    janet_marshal_size(ctx, wrapper->list.count);
+    persimm_list_foreach(&wrapper->list, janet_persimm_marshal_visit, ctx);
+}
+
+static void *janet_persimm_list_unmarshal(JanetMarshalContext *ctx) {
+    janet_persimm_list_t *wrapper =
+        (janet_persimm_list_t *)janet_unmarshal_abstract(ctx, sizeof(janet_persimm_list_t));
+    persimm_list_cursor_reset(&wrapper->cursor);
+    janet_persimm_check(persimm_list_init(&wrapper->list, sizeof(Janet), &janet_persimm_ops,
+                                          NULL));
+
+    size_t count = janet_persimm_unmarshal_count(ctx);
+    for (size_t i = 0; i < count; i++) {
+        Janet value = janet_unmarshal_janet(ctx);
+        janet_persimm_check(persimm_list_cons(&wrapper->list, &value));
+    }
+
+    /* The elements went on the front as they arrived, so the chain reads
+       backwards and is built once more the right way round. Neither step
+       allocates anything Janet knows about, so nothing can be collected while
+       the values are held by only one of the two chains. */
+    persimm_list_t ordered;
+    janet_persimm_check(persimm_list_init(&ordered, sizeof(Janet), &janet_persimm_ops, NULL));
+
+    janet_persimm_reverse_t state = { &ordered, PERSIMM_OK };
+    persimm_list_foreach(&wrapper->list, janet_persimm_reverse_visit, &state);
+    if (PERSIMM_OK != state.status) {
+        persimm_list_deinit(&ordered);
+        janet_persimm_check(state.status);
+    }
+
+    persimm_list_deinit(&wrapper->list);
+    persimm_list_clone(&ordered, &wrapper->list);
+    persimm_list_deinit(&ordered);
+    persimm_list_cursor_reset(&wrapper->cursor);
+
+    return wrapper;
+}
+
 static Janet persimm_list_method_length(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 1);
     janet_persimm_list_t *wrapper =
@@ -444,6 +596,8 @@ static JanetMethod persimm_list_methods[] = {
 
 static JanetMethod persimm_map_methods[2];
 static int janet_persimm_map_compare(void *p1, void *p2);
+static void janet_persimm_map_marshal(void *p, JanetMarshalContext *ctx);
+static void *janet_persimm_map_unmarshal(JanetMarshalContext *ctx);
 
 static int janet_persimm_map_gc(void *p, size_t size) {
     (void) size;
@@ -519,8 +673,8 @@ static const JanetAbstractType persimm_map_type = {
     janet_persimm_map_mark, /* GC Mark */
     janet_persimm_map_get, /* Get */
     NULL, /* Set */
-    NULL, /* Marshall */
-    NULL, /* Unmarshall */
+    janet_persimm_map_marshal, /* Marshall */
+    janet_persimm_map_unmarshal, /* Unmarshall */
     janet_persimm_map_to_string, /* String */
     janet_persimm_map_compare, /* Compare */
     janet_persimm_map_hash, /* Hash */
@@ -564,6 +718,35 @@ static int janet_persimm_map_compare(void *p1, void *p2) {
     return 0;
 }
 
+static void janet_persimm_map_marshal(void *p, JanetMarshalContext *ctx) {
+    persimm_map_t *map = (persimm_map_t *)p;
+    janet_marshal_abstract(ctx, p);
+    janet_marshal_size(ctx, map->count);
+    persimm_map_foreach(map, janet_persimm_map_marshal_visit, ctx);
+}
+
+static void *janet_persimm_map_unmarshal(JanetMarshalContext *ctx) {
+    persimm_map_t *map = (persimm_map_t *)janet_unmarshal_abstract(ctx, sizeof(persimm_map_t));
+    janet_persimm_check(persimm_map_init(map, &janet_persimm_map_layout, &janet_persimm_ops,
+                                         &janet_persimm_key_ops, NULL));
+
+    size_t count = janet_persimm_unmarshal_count(ctx);
+    for (size_t i = 0; i < count; i++) {
+        Janet key = janet_unmarshal_janet(ctx);
+        janet_persimm_check_key(key);
+
+        /* The key is stored against itself so that the map holds it, and the
+           collector can see it, while the value is read. Storing it a second
+           time replaces the stand-in and leaves the count where it was. */
+        janet_persimm_entry_t entry = { key, key };
+        janet_persimm_check(persimm_map_assoc(map, &entry, false));
+        entry.value = janet_unmarshal_janet(ctx);
+        janet_persimm_check(persimm_map_assoc(map, &entry, false));
+    }
+
+    return map;
+}
+
 static Janet persimm_map_method_length(int32_t argc, Janet *argv) {
     janet_fixarity(argc, 1);
     persimm_map_t *map = (persimm_map_t *)janet_getabstract(argv, 0, &persimm_map_type);
@@ -579,6 +762,8 @@ static JanetMethod persimm_map_methods[] = {
 
 static JanetMethod persimm_set_methods[2];
 static int janet_persimm_set_compare(void *p1, void *p2);
+static void janet_persimm_set_marshal(void *p, JanetMarshalContext *ctx);
+static void *janet_persimm_set_unmarshal(JanetMarshalContext *ctx);
 
 static int janet_persimm_set_gc(void *p, size_t size) {
     (void) size;
@@ -648,8 +833,8 @@ static const JanetAbstractType persimm_set_type = {
     janet_persimm_set_mark, /* GC Mark */
     janet_persimm_set_get, /* Get */
     NULL, /* Set */
-    NULL, /* Marshall */
-    NULL, /* Unmarshall */
+    janet_persimm_set_marshal, /* Marshall */
+    janet_persimm_set_unmarshal, /* Unmarshall */
     janet_persimm_set_to_string, /* String */
     janet_persimm_set_compare, /* Compare */
     janet_persimm_set_hash, /* Hash */
@@ -680,6 +865,28 @@ static int janet_persimm_set_compare(void *p1, void *p2) {
     }
 
     return 0;
+}
+
+static void janet_persimm_set_marshal(void *p, JanetMarshalContext *ctx) {
+    persimm_set_t *set = (persimm_set_t *)p;
+    janet_marshal_abstract(ctx, p);
+    janet_marshal_size(ctx, set->count);
+    persimm_set_foreach(set, janet_persimm_marshal_visit, ctx);
+}
+
+static void *janet_persimm_set_unmarshal(JanetMarshalContext *ctx) {
+    persimm_set_t *set = (persimm_set_t *)janet_unmarshal_abstract(ctx, sizeof(persimm_set_t));
+    janet_persimm_check(persimm_set_init(set, sizeof(Janet), &janet_persimm_ops,
+                                         &janet_persimm_key_ops, NULL));
+
+    size_t count = janet_persimm_unmarshal_count(ctx);
+    for (size_t i = 0; i < count; i++) {
+        Janet elem = janet_unmarshal_janet(ctx);
+        janet_persimm_check_key(elem);
+        janet_persimm_check(persimm_set_conj(set, &elem, false));
+    }
+
+    return set;
 }
 
 static Janet persimm_set_method_length(int32_t argc, Janet *argv) {
@@ -750,15 +957,6 @@ static persimm_set_t *janet_persimm_clone_set(const persimm_set_t *src) {
     persimm_set_t *set = (persimm_set_t *)janet_abstract(&persimm_set_type, sizeof(persimm_set_t));
     persimm_set_clone(src, set);
     return set;
-}
-
-/*
- * A nil key can never be looked up again, because nil is how Janet's iteration
- * protocol says "start from the beginning", so it is refused rather than
- * quietly stored.
- */
-static void janet_persimm_check_key(Janet key) {
-    if (janet_checktype(key, JANET_NIL)) janet_panic("expected a key, got nil");
 }
 
 static void janet_persimm_view(Janet coll, JanetView *view) {

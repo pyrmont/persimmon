@@ -206,4 +206,38 @@
   (is (not (= (persimmon/vec [(persimmon/vec [1])]) (persimmon/vec [(persimmon/vec [2])])))))
 
 
+(deftest marshalling-a-vector
+  (def vec1 (persimmon/vec [:foo :bar]))
+  (def vec2 (unmarshal (marshal vec1)))
+  (is (= vec1 vec2))
+  (is (= :bar (get vec2 1)))
+  (is (== @[:foo :bar] (persimmon/to-array vec2))))
+
+
+(deftest marshalling-an-empty-vector
+  (is (= (persimmon/vec) (unmarshal (marshal (persimmon/vec)))))
+  (is (= 0 (length (unmarshal (marshal (persimmon/vec)))))))
+
+
+# Small integers marshal to a byte apiece, which leaves a vector of them with
+# nothing to spare between its length and the end of the input.
+(deftest marshalling-a-vector-of-small-integers
+  (is (= (persimmon/vec [1]) (unmarshal (marshal (persimmon/vec [1])))))
+  (is (= (persimmon/vec [1 2 3]) (unmarshal (marshal (persimmon/vec [1 2 3]))))))
+
+
+(deftest marshalling-a-vector-across-multiple-levels
+  (def vec1 (persimmon/vec (numbers 1100)))
+  (def vec2 (unmarshal (marshal vec1)))
+  (is (= vec1 vec2))
+  (is (== (numbers 1100) (persimmon/to-array vec2))))
+
+
+(deftest marshalling-nested-structures
+  (def nested (persimmon/vec [(persimmon/map {:a 1})
+                              (persimmon/set [:b])
+                              (persimmon/list [1 2])]))
+  (is (= nested (unmarshal (marshal nested)))))
+
+
 (run-tests!)

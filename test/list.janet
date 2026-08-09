@@ -248,4 +248,35 @@
   (is (= nil (get t (persimmon/list [:bar])))))
 
 
+(deftest marshalling-a-list
+  (def lst1 (persimmon/list [:foo :bar :qux]))
+  (def lst2 (unmarshal (marshal lst1)))
+  (is (= lst1 lst2))
+  (is (= :foo (persimmon/first lst2)))
+  (is (== @[:foo :bar :qux] (persimmon/to-array lst2))))
+
+
+(deftest marshalling-an-empty-list
+  (is (= (persimmon/list) (unmarshal (marshal (persimmon/list)))))
+  (is (= 0 (length (unmarshal (marshal (persimmon/list)))))))
+
+
+# Consing puts an element on the front, so a list read back in the order it
+# was written comes out reversed and has to be turned around again.
+(deftest marshalling-preserves-the-order-of-a-list
+  (def lst (unmarshal (marshal (persimmon/list (numbers 1000)))))
+  (is (= 1000 (length lst)))
+  (is (= 0 (persimmon/first lst)))
+  (is (== (numbers 1000) (persimmon/to-array lst))))
+
+
+# A list read back carries a cursor of its own, which has to start from the
+# head of the chain it ended up with rather than the one it was built on.
+(deftest reading-a-list-after-it-is-read-back
+  (def lst (unmarshal (marshal (persimmon/list (numbers 1000)))))
+  (is (= 500 (get lst 500)))
+  (is (= 10 (get lst 10)))
+  (is (= 999 (get lst 999))))
+
+
 (run-tests!)

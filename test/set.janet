@@ -263,4 +263,32 @@
   (is (= nil (get t (persimmon/set [:b])))))
 
 
+(deftest marshalling-a-set
+  (def set1 (persimmon/set [:a :b]))
+  (def set2 (unmarshal (marshal set1)))
+  (is (= set1 set2))
+  (is (= true (persimmon/has-key? set2 :a)))
+  (is (== @[:a :b] (elements set2))))
+
+
+(deftest marshalling-an-empty-set
+  (is (= (persimmon/set) (unmarshal (marshal (persimmon/set)))))
+  (is (= 0 (length (unmarshal (marshal (persimmon/set)))))))
+
+
+(deftest marshalling-a-set-across-multiple-levels
+  (def set1 (persimmon/set (numbers 1100)))
+  (def set2 (unmarshal (marshal set1)))
+  (is (= set1 set2))
+  (is (= (hash set1) (hash set2)))
+  (is (== (persimmon/to-array set1) (persimmon/to-array set2))))
+
+
+(deftest a-set-read-back-survives-a-collection
+  (def s (unmarshal (marshal (persimmon/set (numbers 1100)))))
+  (gccollect)
+  (is (= 1100 (length s)))
+  (is (== (numbers 1100) (elements s))))
+
+
 (run-tests!)
