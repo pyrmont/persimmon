@@ -16,16 +16,16 @@
              :libraries []
              :manpages []
              :natives [{:name "persimmon"
-                        # Everything under src is the host-agnostic core
-                        # and knows nothing about Janet. Only the wrapper
-                        # includes janet.h.
+                        # Files directly under src are the host-agnostic core.
+                        # Host bindings live below src/bind; only the Janet
+                        # binding includes janet.h.
                         :files ["src/persimmon.c"
                                 "src/persimmon_vector.c"
                                 "src/persimmon_list.c"
                                 "src/persimmon_hamt.c"
                                 "src/persimmon_map.c"
                                 "src/persimmon_set.c"
-                                "wrappers/janet/wrapper.c"]
+                                "src/bind/janet/wrapper.c"]
                         # The core reaches for C11 atomics when the
                         # toolchain has them and falls back to compiler
                         # builtins otherwise, so c99 remains enough.

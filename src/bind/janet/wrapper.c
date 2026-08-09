@@ -1,8 +1,5 @@
 #include "wrapper.h"
-/* The core sits beside this wrapper rather than on an include path, so it is
-   named by where it is. A wrapper is bound to this layout in any case: it
-   exists only to bind this library and cannot be lifted out on its own. */
-#include "../../src/persimmon.h"
+#include "../../persimmon.h"
 
 /*
  * The Janet binding. Elements are Janet values stored inline, so no reference

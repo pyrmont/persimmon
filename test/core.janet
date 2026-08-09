@@ -24,14 +24,15 @@
 
 (defn- sources
   ``Reads the core's source files out of the info file, so that adding one to
-    the build cannot leave it untested. The core is what lives under src; a
-    wrapper is written against a host language and must not be linked in.``
+    the build cannot leave it untested. Core sources live directly under src;
+    host bindings below src/bind must not be linked in.``
   []
   (def info (-> (path "info.jdn") slurp parse))
   (def natives (get-in info [:artifacts :natives] []))
   (seq [nat :in natives
         file :in (get nat :files [])
-        :when (string/has-prefix? "src/" file)]
+        :when (and (string/has-prefix? "src/" file)
+                   (= 1 (length (string/find-all "/" file))))]
     (path file)))
 
 (defn- runnable?

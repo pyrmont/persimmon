@@ -49,16 +49,16 @@ two share their whole implementation.
 
 ## Structure
 
-The library is in two layers, and the directories say which is which.
+The compiled source is in two layers, and the directories say which is which.
 
 ```
 src/                    the core, which knows no host language
-wrappers/janet/         the Janet wrapper
+src/bind/janet/         the Janet binding
 ```
 
-Everything under `src` is the core. Its elements are opaque blobs of a fixed
-size, stored inline in the structure, and it delegates their lifecycle to a
-table of callbacks the host supplies:
+The files directly under `src` make up the core. Its elements are opaque blobs
+of a fixed size, stored inline in the structure, and it delegates their
+lifecycle to a table of callbacks the host supplies:
 
 ```c
 typedef struct {
@@ -72,10 +72,10 @@ A host that reference counts fills in `retain` and `release`; a host with a
 tracing collector fills in `trace`; a host storing plain data passes NULL and
 pays for none of it.
 
-`wrappers/janet` holds the Janet wrapper, which is the reference
-implementation of that interface. It stores `Janet` values inline, leaves
-`retain` and `release` NULL, and traces through `janet_mark`. A wrapper for
-another language would sit beside it, and nothing in `src` would change.
+`src/bind` holds host-language bindings. Its `janet` directory contains the
+reference implementation of that interface. It stores `Janet` values inline,
+leaves `retain` and `release` NULL, and traces through `janet_mark`. A binding
+for another language would sit beside it without changing the core.
 
 Node and cell reference counts are atomic wherever the toolchain provides
 atomics, whether through C11 `<stdatomic.h>`, the GCC and Clang builtins, or

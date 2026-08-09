@@ -19,7 +19,8 @@
   (def natives (get-in info [:artifacts :natives] []))
   (seq [nat :in natives
         file :in (get nat :files [])
-        :when (string/has-prefix? "src/" file)]
+        :when (and (string/has-prefix? "src/" file)
+                   (= 1 (length (string/find-all "/" file))))]
     (path file)))
 
 (defn- runnable? [cmd]
