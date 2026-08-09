@@ -73,7 +73,8 @@
   (def lst2 (persimmon/rest lst1))
   (is (= 3 (length lst1)))
   (is (= :foo (persimmon/first lst1)))
-  (is (== [:foo :bar :qux] (persimmon/to-array lst1))))
+  (is (== [:foo :bar :qux] (persimmon/to-array lst1)))
+  (is (== [:bar :qux] (persimmon/to-array lst2))))
 
 
 # Taking the rest of a list and consing onto the original leaves both sharing
