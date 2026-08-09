@@ -2,7 +2,7 @@
 
 ## persimmon
 
-[assoc](#assoc), [assoc!](#assoc-1), [conj](#conj), [conj!](#conj-1), [disj](#disj), [disj!](#disj-1), [dissoc](#dissoc), [dissoc!](#dissoc-1), [first](#first), [has-key?](#has-key), [list](#list), [map](#map), [persistent!](#persistent), [rest](#rest), [set](#set), [to-array](#to-array), [to-table](#to-table), [transient](#transient), [vec](#vec)
+[assoc](#assoc), [assoc!](#assoc-1), [conj](#conj), [conj!](#conj-1), [disj](#disj), [disj!](#disj-1), [dissoc](#dissoc), [dissoc!](#dissoc-1), [first](#first), [has-key?](#has-key), [into](#into), [list](#list), [map](#map), [persistent!](#persistent), [rest](#rest), [set](#set), [to-array](#to-array), [to-table](#to-table), [transient](#transient), [vec](#vec)
 
 ## assoc
 
@@ -14,7 +14,7 @@
 
 Returns a new persistent vector or map with key associated with value. Vector keys are indices and may be negative. Associating nil in a map removes the key. coll is unchanged.
 
-[1]: wrapper.c#L1369
+[1]: wrapper.c#L1581
 
 
 ## assoc!
@@ -27,7 +27,7 @@ Returns a new persistent vector or map with key associated with value. Vector ke
 
 Associates key with value in a vector or map transient in place. Vector keys are indices and may be negative. Associating nil in a map removes the key. Returns trans.
 
-[2]: wrapper.c#L1526
+[2]: wrapper.c#L1738
 
 
 ## conj
@@ -40,7 +40,7 @@ Associates key with value in a vector or map transient in place. Vector keys are
 
 Returns a new persistent collection with x added: at the end of a vector, at the front of a list, or as an element of a set. coll is unchanged.
 
-[3]: wrapper.c#L1337
+[3]: wrapper.c#L1549
 
 
 ## conj!
@@ -53,7 +53,7 @@ Returns a new persistent collection with x added: at the end of a vector, at the
 
 Adds x to a vector or set transient in place. Returns trans.
 
-[4]: wrapper.c#L1503
+[4]: wrapper.c#L1715
 
 
 ## disj
@@ -66,7 +66,7 @@ Adds x to a vector or set transient in place. Returns trans.
 
 Returns a new persistent set without x. set is unchanged.
 
-[5]: wrapper.c#L1420
+[5]: wrapper.c#L1632
 
 
 ## disj!
@@ -79,7 +79,7 @@ Returns a new persistent set without x. set is unchanged.
 
 Removes x from a set transient in place. Returns trans.
 
-[6]: wrapper.c#L1566
+[6]: wrapper.c#L1778
 
 
 ## dissoc
@@ -92,7 +92,7 @@ Removes x from a set transient in place. Returns trans.
 
 Returns a new persistent map without key. map is unchanged.
 
-[7]: wrapper.c#L1406
+[7]: wrapper.c#L1618
 
 
 ## dissoc!
@@ -105,7 +105,7 @@ Returns a new persistent map without key. map is unchanged.
 
 Removes key from a map transient in place. Returns trans.
 
-[8]: wrapper.c#L1555
+[8]: wrapper.c#L1767
 
 
 ## first
@@ -118,7 +118,7 @@ Removes key from a map transient in place. Returns trans.
 
 Returns the first element of a persistent list, or nil if the list is empty.
 
-[9]: wrapper.c#L1616
+[9]: wrapper.c#L1828
 
 
 ## has-key?
@@ -131,38 +131,51 @@ Returns the first element of a persistent list, or nil if the list is empty.
 
 Returns true if the persistent map or set coll contains key, or false otherwise. A nil key always returns false.
 
-[10]: wrapper.c#L1582
+[10]: wrapper.c#L1794
 
 
-## list
+## into
 
 **cfunction**  | [source][11]
 
 ```janet
-(list &opt coll)
+(into target coll)
 ```
 
-Creates a persistent list, optionally populated from the indexed collection coll in the same order. Returns the list.
+Returns a new persistent collection of target's kind holding target's elements and those of coll. A map takes coll's entries, or its elements when each is a key-value pair. Elements go at the end of a vector and in front of a list. target is unchanged.
 
-[11]: wrapper.c#L1245
+[11]: wrapper.c#L1511
 
 
-## map
+## list
 
 **cfunction**  | [source][12]
 
 ```janet
-(map &opt dict)
+(list & xs)
 ```
 
-Creates a persistent map, optionally populated from the dictionary dict. Entries whose value is nil are omitted. Returns the map.
+Creates a persistent list whose elements are xs, in order. Splice a collection to convert one. Returns the list.
 
-[12]: wrapper.c#L1266
+[12]: wrapper.c#L1479
+
+
+## map
+
+**cfunction**  | [source][13]
+
+```janet
+(map & kvs)
+```
+
+Creates a persistent map from alternating keys and values. A key whose value is nil adds no entry. Use into to convert a dictionary. Returns the map.
+
+[13]: wrapper.c#L1487
 
 
 ## persistent!
 
-**cfunction**  | [source][13]
+**cfunction**  | [source][14]
 
 ```janet
 (persistent! trans)
@@ -170,12 +183,12 @@ Creates a persistent map, optionally populated from the dictionary dict. Entries
 
 Consumes a vector, map or set transient and returns its persistent collection. Using trans afterwards is an error.
 
-[13]: wrapper.c#L1471
+[14]: wrapper.c#L1683
 
 
 ## rest
 
-**cfunction**  | [source][14]
+**cfunction**  | [source][15]
 
 ```janet
 (rest list)
@@ -183,25 +196,25 @@ Consumes a vector, map or set transient and returns its persistent collection. U
 
 Returns a persistent list without its first element. The rest of an empty list is an empty list. list is unchanged.
 
-[14]: wrapper.c#L1635
+[15]: wrapper.c#L1847
 
 
 ## set
 
-**cfunction**  | [source][15]
+**cfunction**  | [source][16]
 
 ```janet
-(set &opt coll)
+(set & xs)
 ```
 
-Creates a persistent set, optionally populated from the indexed collection coll. Nil cannot be an element. Returns the set.
+Creates a persistent set whose elements are xs. Nil cannot be an element. Splice a collection to convert one. Returns the set.
 
-[15]: wrapper.c#L1301
+[16]: wrapper.c#L1496
 
 
 ## to-array
 
-**cfunction**  | [source][16]
+**cfunction**  | [source][17]
 
 ```janet
 (to-array coll)
@@ -209,12 +222,12 @@ Creates a persistent set, optionally populated from the indexed collection coll.
 
 Copies a persistent collection into a mutable Janet array. Map entries become key-value tuples. Returns the array.
 
-[16]: wrapper.c#L1655
+[17]: wrapper.c#L1867
 
 
 ## to-table
 
-**cfunction**  | [source][17]
+**cfunction**  | [source][18]
 
 ```janet
 (to-table map)
@@ -222,12 +235,12 @@ Copies a persistent collection into a mutable Janet array. Map entries become ke
 
 Copies the entries of a persistent map into a mutable Janet table. Returns the table.
 
-[17]: wrapper.c#L1603
+[18]: wrapper.c#L1815
 
 
 ## transient
 
-**cfunction**  | [source][18]
+**cfunction**  | [source][19]
 
 ```janet
 (transient coll)
@@ -235,18 +248,18 @@ Copies the entries of a persistent map into a mutable Janet table. Returns the t
 
 Creates a mutable, uniquely owned transient from a persistent vector, map or set. coll is unchanged. Returns the transient.
 
-[18]: wrapper.c#L1435
+[19]: wrapper.c#L1647
 
 
 ## vec
 
-**cfunction**  | [source][19]
+**cfunction**  | [source][20]
 
 ```janet
-(vec &opt coll)
+(vec & xs)
 ```
 
-Creates a persistent vector, optionally populated from the indexed collection coll. Returns the vector.
+Creates a persistent vector whose elements are xs, in order. Splice a collection or use into to convert one. Returns the vector.
 
-[19]: wrapper.c#L1215
+[20]: wrapper.c#L1472
 

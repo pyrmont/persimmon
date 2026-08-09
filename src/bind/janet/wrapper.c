@@ -1197,133 +1197,345 @@ static persimm_set_t *janet_persimm_new_set(void) {
     return set;
 }
 
-static void janet_persimm_view(Janet coll, JanetView *view) {
-    if (janet_checktypes(coll, JANET_TFLAG_INDEXED)) {
-        janet_indexed_view(coll, &view->items, &view->len);
-    } else if (janet_checktypes(coll, JANET_TFLAG_DICTIONARY)) {
-        janet_panic("cannot seed with dictionary");
-    } else {
-        janet_panic("cannot seed with this type");
+/*
+ * Builders
+ *
+ * Each builder seeds a collection through a single transient rather than one
+ * persistent update per element. The values stay reachable through the
+ * caller's arguments for the whole batch, so nothing can be collected
+ * part-way through. The variadic constructors and the from-* conversions
+ * share these, differing only in where their elements come from.
+ */
+
+static persimm_vector_t *janet_persimm_build_vector(const Janet *items, int32_t len) {
+    persimm_vector_t *vector = janet_persimm_new_vector();
+    if (0 == len) return vector;
+
+    persimm_vector_transient_t transient;
+    janet_persimm_check(persimm_vector_to_transient(vector, &transient));
+    persimm_vector_deinit(vector);
+    for (int32_t i = 0; i < len; i++) {
+        persimm_status status = persimm_vector_transient_push(&transient, &items[i]);
+        if (PERSIMM_OK != status) {
+            persimm_vector_transient_deinit(&transient);
+            janet_panic(persimm_status_string(status));
+        }
     }
+    janet_persimm_check(persimm_vector_transient_persist(&transient, vector));
+
+    return vector;
+}
+
+static janet_persimm_list_t *janet_persimm_build_list(const Janet *items, int32_t len) {
+    janet_persimm_list_t *wrapper = janet_persimm_new_list();
+
+    /* Consing walks the elements backwards so the list reads in the same
+       order as the arguments it came from. */
+    for (int32_t i = len - 1; i >= 0; i--) {
+        janet_persimm_check(janet_persimm_list_build_cons(&wrapper->list, &items[i]));
+    }
+
+    return wrapper;
+}
+
+static persimm_set_t *janet_persimm_build_set(const Janet *items, int32_t len) {
+    persimm_set_t *set = janet_persimm_new_set();
+    if (0 == len) return set;
+
+    /* Reject nil before building so a bad element leaves nothing half-made. */
+    for (int32_t i = 0; i < len; i++) janet_persimm_check_key(items[i]);
+
+    persimm_set_transient_t transient;
+    janet_persimm_check(persimm_set_to_transient(set, &transient));
+    persimm_set_deinit(set);
+    for (int32_t i = 0; i < len; i++) {
+        persimm_status status = persimm_set_transient_conj(&transient, &items[i]);
+        if (PERSIMM_OK != status) {
+            persimm_set_transient_deinit(&transient);
+            janet_panic(persimm_status_string(status));
+        }
+    }
+    janet_persimm_check(persimm_set_transient_persist(&transient, set));
+
+    return set;
+}
+
+static void janet_persimm_seed_entry(persimm_map_transient_t *transient,
+                                     Janet key, Janet value) {
+    janet_persimm_entry_t entry = { key, value };
+    persimm_status status = persimm_map_transient_assoc(transient, &entry);
+    if (PERSIMM_OK != status) {
+        persimm_map_transient_deinit(transient);
+        janet_panic(persimm_status_string(status));
+    }
+}
+
+/* Pairs arrive flat: a key at each even offset and its value just after it. */
+static persimm_map_t *janet_persimm_build_map(const Janet *pairs, int32_t len) {
+    persimm_map_t *map = janet_persimm_new_map();
+    if (0 == len) return map;
+
+    for (int32_t i = 0; i < len; i += 2) janet_persimm_check_key(pairs[i]);
+
+    persimm_map_transient_t transient;
+    janet_persimm_check(persimm_map_to_transient(map, &transient));
+    persimm_map_deinit(map);
+    for (int32_t i = 0; i < len; i += 2) {
+        /* A nil value is no entry, as it is in a Janet table. */
+        if (janet_checktype(pairs[i + 1], JANET_NIL)) continue;
+        janet_persimm_seed_entry(&transient, pairs[i], pairs[i + 1]);
+    }
+    janet_persimm_check(persimm_map_transient_persist(&transient, map));
+
+    return map;
+}
+
+/*
+ * Sources
+ *
+ * `into` reads its source as a sequence of elements, or of entries when the
+ * destination is a map. Everything that is not already a Janet indexed
+ * collection is copied into an array first, which keeps one walk in one place
+ * at the cost of a shallow copy. A map's entries become key-value tuples, as
+ * they do in to-array, so a map reads as a sequence of pairs anywhere
+ * elements are wanted.
+ */
+static JanetArray *janet_persimm_elements(Janet coll) {
+    const Janet *items;
+    int32_t len;
+    if (janet_indexed_view(coll, &items, &len)) {
+        JanetArray *array = janet_array(len);
+        for (int32_t i = 0; i < len; i++) janet_array_push(array, items[i]);
+        return array;
+    }
+
+    const JanetKV *kvs;
+    int32_t cap;
+    if (janet_dictionary_view(coll, &kvs, &len, &cap)) {
+        JanetArray *array = janet_array(len);
+        for (int32_t i = 0; i < cap; i++) {
+            if (janet_checktype(kvs[i].key, JANET_NIL)) continue;
+            if (janet_checktype(kvs[i].value, JANET_NIL)) continue;
+            Janet pair[2] = { kvs[i].key, kvs[i].value };
+            janet_array_push(array, janet_wrap_tuple(janet_tuple_n(pair, 2)));
+        }
+        return array;
+    }
+
+    if (janet_checkabstract(coll, &persimm_vector_type)) {
+        persimm_vector_t *vector = (persimm_vector_t *)janet_unwrap_abstract(coll);
+        JanetArray *array = janet_array((int32_t)vector->count);
+        persimm_vector_foreach(vector, janet_persimm_to_array_visit, array);
+        return array;
+    }
+
+    if (janet_checkabstract(coll, &persimm_list_type)) {
+        janet_persimm_list_t *wrapper = (janet_persimm_list_t *)janet_unwrap_abstract(coll);
+        JanetArray *array = janet_array((int32_t)wrapper->list.count);
+        persimm_list_foreach(&wrapper->list, janet_persimm_to_array_visit, array);
+        return array;
+    }
+
+    if (janet_checkabstract(coll, &persimm_set_type)) {
+        persimm_set_t *set = (persimm_set_t *)janet_unwrap_abstract(coll);
+        JanetArray *array = janet_array((int32_t)set->count);
+        persimm_set_foreach(set, janet_persimm_to_array_visit, array);
+        return array;
+    }
+
+    if (janet_checkabstract(coll, &persimm_map_type)) {
+        persimm_map_t *map = (persimm_map_t *)janet_unwrap_abstract(coll);
+        JanetArray *array = janet_array((int32_t)map->count);
+        persimm_map_foreach(map, janet_persimm_map_to_array_visit, array);
+        return array;
+    }
+
+    janet_panicf("cannot read elements from %v", coll);
+}
+
+/* An entry source is read as pairs, so anything but a pair is an error. */
+static void janet_persimm_pair(Janet elem, Janet *key, Janet *value) {
+    const Janet *items;
+    int32_t len;
+    if (!janet_indexed_view(elem, &items, &len) || 2 != len) {
+        janet_panicf("expected a key-value pair, got %v", elem);
+    }
+    *key = items[0];
+    *value = items[1];
+}
+
+/*
+ * Filling a destination allocates it through janet_abstract, which can
+ * collect. The elements are only reachable from a C local until then, so they
+ * are rooted across that one allocation. Nothing the persistent core does
+ * afterwards allocates through Janet.
+ */
+static persimm_vector_t *janet_persimm_into_vector(const persimm_vector_t *target,
+                                                   JanetArray *elems) {
+    janet_gcroot(janet_wrap_array(elems));
+    persimm_vector_t *result = janet_persimm_alloc_vector();
+    janet_gcunroot(janet_wrap_array(elems));
+
+    persimm_vector_transient_t transient;
+    janet_persimm_check(persimm_vector_to_transient(target, &transient));
+    for (int32_t i = 0; i < elems->count; i++) {
+        persimm_status status = persimm_vector_transient_push(&transient, &elems->data[i]);
+        if (PERSIMM_OK != status) {
+            persimm_vector_transient_deinit(&transient);
+            janet_panic(persimm_status_string(status));
+        }
+    }
+    janet_persimm_check(persimm_vector_transient_persist(&transient, result));
+
+    return result;
+}
+
+/*
+ * The elements go in front of the target, in their own order, so the result
+ * reads as the source followed by what the target already held.
+ */
+static janet_persimm_list_t *janet_persimm_into_list(const persimm_list_t *target,
+                                                     JanetArray *elems) {
+    janet_gcroot(janet_wrap_array(elems));
+    janet_persimm_list_t *result = janet_persimm_alloc_list();
+    janet_gcunroot(janet_wrap_array(elems));
+
+    janet_persimm_check(persimm_list_clone(target, &result->list));
+    for (int32_t i = elems->count - 1; i >= 0; i--) {
+        janet_persimm_check(janet_persimm_list_build_cons(&result->list, &elems->data[i]));
+    }
+
+    return result;
+}
+
+static persimm_set_t *janet_persimm_into_set(const persimm_set_t *target,
+                                             JanetArray *elems) {
+    for (int32_t i = 0; i < elems->count; i++) janet_persimm_check_key(elems->data[i]);
+
+    janet_gcroot(janet_wrap_array(elems));
+    persimm_set_t *result = janet_persimm_alloc_set();
+    janet_gcunroot(janet_wrap_array(elems));
+
+    persimm_set_transient_t transient;
+    janet_persimm_check(persimm_set_to_transient(target, &transient));
+    for (int32_t i = 0; i < elems->count; i++) {
+        persimm_status status = persimm_set_transient_conj(&transient, &elems->data[i]);
+        if (PERSIMM_OK != status) {
+            persimm_set_transient_deinit(&transient);
+            janet_panic(persimm_status_string(status));
+        }
+    }
+    janet_persimm_check(persimm_set_transient_persist(&transient, result));
+
+    return result;
+}
+
+static persimm_map_t *janet_persimm_into_map(const persimm_map_t *target,
+                                             JanetArray *pairs) {
+    for (int32_t i = 0; i < pairs->count; i++) {
+        Janet key;
+        Janet value;
+        janet_persimm_pair(pairs->data[i], &key, &value);
+        janet_persimm_check_key(key);
+    }
+
+    janet_gcroot(janet_wrap_array(pairs));
+    persimm_map_t *result = janet_persimm_alloc_map();
+    janet_gcunroot(janet_wrap_array(pairs));
+
+    persimm_map_transient_t transient;
+    janet_persimm_check(persimm_map_to_transient(target, &transient));
+    for (int32_t i = 0; i < pairs->count; i++) {
+        Janet key;
+        Janet value;
+        janet_persimm_pair(pairs->data[i], &key, &value);
+        /* A nil value is no entry, as it is in a Janet table. */
+        if (janet_checktype(value, JANET_NIL)) continue;
+        janet_persimm_seed_entry(&transient, key, value);
+    }
+    janet_persimm_check(persimm_map_transient_persist(&transient, result));
+
+    return result;
 }
 
 /* C Functions */
 
+/*
+ * The constructors are variadic like Janet's own, so an argument is an
+ * element rather than something to copy out of. Splicing converts an existing
+ * collection, `(vec ;coll)`, and into does the same while naming its
+ * destination rather than its source.
+ */
 JANET_FN(cfun_persimm_vec,
-         "(vec &opt coll)",
-         "Creates a persistent vector, optionally populated from the indexed "
-         "collection coll. Returns the vector.") {
-    janet_arity(argc, 0, 1);
-
-    persimm_vector_t *vector = janet_persimm_new_vector();
-
-    if (1 == argc) {
-        JanetView view;
-        janet_persimm_view(argv[0], &view);
-
-        /* Every value remains reachable through argv[0], so construction can
-           keep one transient for the whole batch. */
-        persimm_vector_transient_t transient;
-        janet_persimm_check(persimm_vector_to_transient(vector, &transient));
-        persimm_vector_deinit(vector);
-        for (int32_t i = 0; i < view.len; i++) {
-            persimm_status status = persimm_vector_transient_push(&transient, &view.items[i]);
-            if (PERSIMM_OK != status) {
-                persimm_vector_transient_deinit(&transient);
-                janet_panic(persimm_status_string(status));
-            }
-        }
-        janet_persimm_check(persimm_vector_transient_persist(&transient, vector));
-    }
-
-    return janet_wrap_abstract(vector);
+         "(vec & xs)",
+         "Creates a persistent vector whose elements are xs, in order. Splice "
+         "a collection or use into to convert one. Returns the vector.") {
+    return janet_wrap_abstract(janet_persimm_build_vector(argv, argc));
 }
 
 JANET_FN(cfun_persimm_list,
-         "(list &opt coll)",
-         "Creates a persistent list, optionally populated from the indexed "
-         "collection coll in the same order. Returns the list.") {
-    janet_arity(argc, 0, 1);
-
-    janet_persimm_list_t *wrapper = janet_persimm_new_list();
-
-    if (1 == argc) {
-        JanetView view;
-        janet_persimm_view(argv[0], &view);
-        /* Consing walks the collection backwards so the list reads in the
-           same order as the collection it came from. */
-        for (int32_t i = view.len - 1; i >= 0; i--) {
-            janet_persimm_check(janet_persimm_list_build_cons(&wrapper->list, &view.items[i]));
-        }
-    }
-
-    return janet_wrap_abstract(wrapper);
+         "(list & xs)",
+         "Creates a persistent list whose elements are xs, in order. Splice a "
+         "collection to convert one. Returns the list.") {
+    return janet_wrap_abstract(janet_persimm_build_list(argv, argc));
 }
 
 JANET_FN(cfun_persimm_map,
-         "(map &opt dict)",
-         "Creates a persistent map, optionally populated from the dictionary "
-         "dict. Entries whose value is nil are omitted. Returns the map.") {
-    janet_arity(argc, 0, 1);
+         "(map & kvs)",
+         "Creates a persistent map from alternating keys and values. A key "
+         "whose value is nil adds no entry. Use into to convert a dictionary. "
+         "Returns the map.") {
+    if (0 != argc % 2) janet_panic("expected even number of arguments");
 
-    persimm_map_t *map = janet_persimm_new_map();
-
-    if (1 == argc) {
-        const JanetKV *kvs;
-        int32_t len;
-        int32_t cap;
-        if (!janet_dictionary_view(argv[0], &kvs, &len, &cap)) {
-            janet_panicf("expected a table or struct, got %v", argv[0]);
-        }
-        persimm_map_transient_t transient;
-        janet_persimm_check(persimm_map_to_transient(map, &transient));
-        persimm_map_deinit(map);
-        for (int32_t i = 0; i < cap; i++) {
-            /* An unused slot carries a nil key, and a nil value is no entry. */
-            if (janet_checktype(kvs[i].key, JANET_NIL)) continue;
-            if (janet_checktype(kvs[i].value, JANET_NIL)) continue;
-            janet_persimm_entry_t entry = { kvs[i].key, kvs[i].value };
-            persimm_status status = persimm_map_transient_assoc(&transient, &entry);
-            if (PERSIMM_OK != status) {
-                persimm_map_transient_deinit(&transient);
-                janet_panic(persimm_status_string(status));
-            }
-        }
-        janet_persimm_check(persimm_map_transient_persist(&transient, map));
-    }
-
-    return janet_wrap_abstract(map);
+    return janet_wrap_abstract(janet_persimm_build_map(argv, argc));
 }
 
 JANET_FN(cfun_persimm_set,
-         "(set &opt coll)",
-         "Creates a persistent set, optionally populated from the indexed "
-         "collection coll. Nil cannot be an element. Returns the set.") {
-    janet_arity(argc, 0, 1);
+         "(set & xs)",
+         "Creates a persistent set whose elements are xs. Nil cannot be an "
+         "element. Splice a collection to convert one. Returns the set.") {
+    return janet_wrap_abstract(janet_persimm_build_set(argv, argc));
+}
 
-    persimm_set_t *set = janet_persimm_new_set();
+/*
+ * into names its destination the way to-array and to-table name theirs, and
+ * reads whatever it is given: a Janet indexed collection or dictionary, or
+ * any persistent collection. It is how an existing collection is converted
+ * now that a constructor argument is an element rather than a source.
+ */
+JANET_FN(cfun_persimm_into,
+         "(into target coll)",
+         "Returns a new persistent collection of target's kind holding "
+         "target's elements and those of coll. A map takes coll's entries, or "
+         "its elements when each is a key-value pair. Elements go at the end "
+         "of a vector and in front of a list. target is unchanged.") {
+    janet_fixarity(argc, 2);
 
-    if (1 == argc) {
-        JanetView view;
-        janet_persimm_view(argv[0], &view);
-        for (int32_t i = 0; i < view.len; i++) {
-            janet_persimm_check_key(view.items[i]);
-        }
-
-        persimm_set_transient_t transient;
-        janet_persimm_check(persimm_set_to_transient(set, &transient));
-        persimm_set_deinit(set);
-        for (int32_t i = 0; i < view.len; i++) {
-            persimm_status status = persimm_set_transient_conj(&transient, &view.items[i]);
-            if (PERSIMM_OK != status) {
-                persimm_set_transient_deinit(&transient);
-                janet_panic(persimm_status_string(status));
-            }
-        }
-        janet_persimm_check(persimm_set_transient_persist(&transient, set));
+    if (janet_checkabstract(argv[0], &persimm_vector_type)) {
+        persimm_vector_t *target = (persimm_vector_t *)janet_unwrap_abstract(argv[0]);
+        return janet_wrap_abstract(
+            janet_persimm_into_vector(target, janet_persimm_elements(argv[1])));
     }
 
-    return janet_wrap_abstract(set);
+    if (janet_checkabstract(argv[0], &persimm_list_type)) {
+        janet_persimm_list_t *target = (janet_persimm_list_t *)janet_unwrap_abstract(argv[0]);
+        return janet_wrap_abstract(
+            janet_persimm_into_list(&target->list, janet_persimm_elements(argv[1])));
+    }
+
+    if (janet_checkabstract(argv[0], &persimm_set_type)) {
+        persimm_set_t *target = (persimm_set_t *)janet_unwrap_abstract(argv[0]);
+        return janet_wrap_abstract(
+            janet_persimm_into_set(target, janet_persimm_elements(argv[1])));
+    }
+
+    if (janet_checkabstract(argv[0], &persimm_map_type)) {
+        persimm_map_t *target = (persimm_map_t *)janet_unwrap_abstract(argv[0]);
+        return janet_wrap_abstract(
+            janet_persimm_into_map(target, janet_persimm_elements(argv[1])));
+    }
+
+    janet_panicf("expected a persimmon collection, got %v", argv[0]);
 }
 
 /*
@@ -1724,6 +1936,7 @@ void persimm_register_functions(JanetTable *env) {
         JANET_REG("has-key?", cfun_persimm_has_key),
         JANET_REG("first", cfun_persimm_first),
         JANET_REG("rest", cfun_persimm_rest),
+        JANET_REG("into", cfun_persimm_into),
         JANET_REG("to-array", cfun_persimm_to_array),
         JANET_REG("to-table", cfun_persimm_to_table),
         JANET_REG_END

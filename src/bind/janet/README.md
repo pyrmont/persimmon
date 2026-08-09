@@ -20,7 +20,7 @@ Add the dependency to your `info.jdn` file:
 ```janet
 (import persimmon)
 
-(def v1 (persimmon/vec [:foo :bar]))
+(def v1 (persimmon/vec :foo :bar))
 (def v2 (persimmon/conj v1 :qux))
 (def v3 (persimmon/assoc v2 0 :quux))
 
@@ -28,25 +28,46 @@ Add the dependency to your `info.jdn` file:
 (get v2 2)              # -> :qux
 (persimmon/to-array v3) # -> @[:quux :bar :qux]
 
-(def l1 (persimmon/list [:bar :qux]))
+(def l1 (persimmon/list :bar :qux))
 (def l2 (persimmon/conj l1 :foo))
 
 (persimmon/first l2)                     # -> :foo
 (persimmon/to-array (persimmon/rest l2)) # -> @[:bar :qux]
 
-(def m1 (persimmon/map {:foo 1 :bar 2}))
+(def m1 (persimmon/map :foo 1 :bar 2))
 (def m2 (persimmon/assoc m1 :qux 3))
 (def m3 (persimmon/dissoc m2 :foo))
 
 (get m2 :qux)           # -> 3
 (persimmon/to-table m3) # -> @{:bar 2 :qux 3}
 
-(def s1 (persimmon/set [:foo :bar]))
+(def s1 (persimmon/set :foo :bar))
 (def s2 (persimmon/conj s1 :qux))
 
 (get s2 :qux)                # -> :qux
 (persimmon/has-key? s2 :foo) # -> true
 ```
+
+The constructors are variadic like Janet's own `array` and `table`, so each
+argument is an element rather than a collection to copy out of. `(persimmon/vec
+[1 2 3])` is a vector holding one tuple.
+
+To convert an existing collection, splice it into a constructor or use `into`,
+which names its destination the way `to-array` and `to-table` name theirs:
+
+```janet
+(persimmon/vec ;[1 2 3])                    # -> a vector of 1, 2 and 3
+(persimmon/into (persimmon/vec) @[1 2 3])   # the same, without splicing
+(persimmon/into (persimmon/map) @{:foo 1})  # -> a map of :foo to 1
+(persimmon/into (persimmon/set) v1)         # -> a set of a vector's elements
+```
+
+`into` reads anything a collection can be built from — a Janet array, tuple,
+table or struct, or another persistent collection — and adds it to whatever
+the target already holds, leaving the target unchanged. Elements go where that
+structure takes them most cheaply, at the end of a vector and in front of a
+list. A map takes entries, so a source of plain elements has to supply each as
+a key-value pair.
 
 As in Clojure, `conj` adds an element wherever the structure takes one most
 cheaply — the end of a vector, the front of a list, anywhere in a set.

@@ -4,7 +4,7 @@
 
 
 (deftest vector-transient
-  (def original (persimmon/vec [0 1 2]))
+  (def original (persimmon/vec 0 1 2))
   (def trans (persimmon/transient original))
   (persimmon/conj! trans 3)
   (persimmon/assoc! trans 1 :one)
@@ -23,7 +23,7 @@
 
 
 (deftest map-transient
-  (def original (persimmon/map {:a 1 :b 2}))
+  (def original (persimmon/map :a 1 :b 2))
   (def trans (persimmon/transient original))
   (persimmon/assoc! trans :a 10)
   (persimmon/assoc! trans :c 3)
@@ -41,13 +41,13 @@
 
 
 (deftest assoc-nil-removes-from-map-transient
-  (def trans (persimmon/transient (persimmon/map {:a 1 :b 2})))
+  (def trans (persimmon/transient (persimmon/map :a 1 :b 2)))
   (persimmon/assoc! trans :a nil)
   (is (== @{:b 2} (persimmon/to-table (persimmon/persistent! trans)))))
 
 
 (deftest set-transient
-  (def original (persimmon/set [:a :b]))
+  (def original (persimmon/set :a :b))
   (def trans (persimmon/transient original))
   (persimmon/conj! trans :c)
   (persimmon/disj! trans :a)
@@ -62,7 +62,7 @@
 
 
 (deftest only-editable-collections-become-transient
-  (is (thrown? (persimmon/transient (persimmon/list [1 2])))))
+  (is (thrown? (persimmon/transient (persimmon/list 1 2)))))
 
 
 (run-tests!)

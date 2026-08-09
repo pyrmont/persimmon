@@ -27,32 +27,52 @@
 
 
 (deftest set-with-one-element
-  (def s (persimmon/set [:a]))
+  (def s (persimmon/set :a))
   (is (= 1 (length s)))
   (is (= true (persimmon/has-key? s :a)))
   (is (= false (persimmon/has-key? s :b))))
 
 
 (deftest set-collapses-duplicates
-  (def s (persimmon/set [:a :b :a :b :a]))
+  (def s (persimmon/set :a :b :a :b :a))
   (is (= 2 (length s)))
   (is (== @[:a :b] (elements s))))
 
 
 (deftest set-with-elements-across-multiple-levels
   (def expect (numbers 1100))
-  (def s (persimmon/set expect))
+  (def s (persimmon/set ;expect))
   (is (= 1100 (length s)))
   (is (== expect (elements s))))
 
 
 (deftest set-refuses-a-nil-element
-  (is (thrown? (persimmon/set [nil])))
+  (is (thrown? (persimmon/set nil)))
   (is (thrown? (persimmon/conj (persimmon/set) nil))))
 
 
-(deftest set-refuses-a-collection-it-cannot-read
-  (is (thrown? (persimmon/set {:a 1}))))
+(deftest into-a-set-from-a-collection
+  (is (== @[:a :b] (elements (persimmon/into (persimmon/set) @[:a :b]))))
+  (is (== @[:a :b] (elements (persimmon/into (persimmon/set) (persimmon/vec :a :b))))))
+
+
+(deftest into-a-set-unions-with-what-it-already-holds
+  (def s1 (persimmon/set :a))
+  (def s2 (persimmon/into s1 @[:b :a]))
+  (is (== @[:a :b] (elements s2)))
+  (is (== @[:a] (elements s1))))
+
+
+(deftest into-a-set-refuses-a-nil-element
+  (is (thrown? (persimmon/into (persimmon/set) @[nil]))))
+
+
+# A constructor argument is an element, never something to read through, so a
+# collection passed whole is one element rather than an error.
+(deftest set-holds-a-collection-as-a-single-element
+  (def s (persimmon/set [:a 1] @{:b 2}))
+  (is (= 2 (length s)))
+  (is (= true (persimmon/has-key? s [:a 1]))))
 
 
 # `length` reads the abstract type's length slot while `:length` goes through
@@ -60,14 +80,14 @@
 (deftest length-of-a-set
   (is (= 0 (length (persimmon/set))))
   (is (= 0 (:length (persimmon/set))))
-  (def s (persimmon/set (numbers 1100)))
+  (def s (persimmon/set ;(numbers 1100)))
   (is (= 1100 (length s)))
   (is (= 1100 (:length s))))
 
 
 # As in Clojure, looking an element up in a set answers with the element.
 (deftest get-with-a-set
-  (def s (persimmon/set [:a :b]))
+  (def s (persimmon/set :a :b))
   (is (= :a (get s :a)))
   (is (= nil (get s :c)))
   (is (= nil (get s nil)))
@@ -75,12 +95,12 @@
 
 
 (deftest get-prefers-an-element-over-a-method
-  (is (= :length (get (persimmon/set [:length]) :length)))
-  (is (= 1 (:length (persimmon/set [:a])))))
+  (is (= :length (get (persimmon/set :length) :length)))
+  (is (= 1 (:length (persimmon/set :a)))))
 
 
 (deftest conj-with-a-new-element
-  (def s1 (persimmon/set [:a]))
+  (def s1 (persimmon/set :a))
   (def s2 (persimmon/conj s1 :b))
   (is (= 1 (length s1)))
   (is (= 2 (length s2)))
@@ -89,7 +109,7 @@
 
 
 (deftest conj-with-an-existing-element
-  (def s1 (persimmon/set [:a :b]))
+  (def s1 (persimmon/set :a :b))
   (def s2 (persimmon/conj s1 :a))
   (is (= 2 (length s2)))
   (is (== @[:a :b] (elements s2))))
@@ -104,7 +124,7 @@
 
 
 (deftest disj-with-an-existing-element
-  (def s1 (persimmon/set [:a :b]))
+  (def s1 (persimmon/set :a :b))
   (def s2 (persimmon/disj s1 :a))
   (is (= 2 (length s1)))
   (is (= 1 (length s2)))
@@ -113,14 +133,14 @@
 
 
 (deftest disj-with-a-missing-element
-  (def s1 (persimmon/set [:a]))
+  (def s1 (persimmon/set :a))
   (def s2 (persimmon/disj s1 :b))
   (is (= 1 (length s2)))
   (is (= true (persimmon/has-key? s2 :a))))
 
 
 (deftest disj-back-to-empty
-  (var s (persimmon/set (numbers 1100)))
+  (var s (persimmon/set ;(numbers 1100)))
   (for i 0 1100
     (set s (persimmon/disj s i)))
   (is (= 0 (length s)))
@@ -128,7 +148,7 @@
 
 
 (deftest disj-leaves-the-remaining-elements-reachable
-  (var s (persimmon/set (numbers 1100)))
+  (var s (persimmon/set ;(numbers 1100)))
   (for i 0 1100
     (when (even? i) (set s (persimmon/disj s i))))
   (is (= 550 (length s)))
@@ -141,27 +161,27 @@
 
 
 (deftest next-with-a-missing-element
-  (is (= nil (next (persimmon/set [:a]) :absent))))
+  (is (= nil (next (persimmon/set :a) :absent))))
 
 
 (deftest iterating-a-set
-  (def s (persimmon/set [:a :b :c]))
+  (def s (persimmon/set :a :b :c))
   (is (== @[:a :b :c] (sorted (keys s))))
   (is (== @[:a :b :c] (sorted (values s))))
   (is (== @[:a :b :c] (sorted (seq [v :in s] v)))))
 
 
 (deftest iterating-a-set-across-multiple-levels
-  (def s (persimmon/set (numbers 1100)))
+  (def s (persimmon/set ;(numbers 1100)))
   (is (== (numbers 1100) (sorted (seq [v :in s] v)))))
 
 
 (deftest iteration-order-does-not-depend-on-how-a-set-was-built
-  (def direct (persimmon/set (numbers 100)))
+  (def direct (persimmon/set ;(numbers 100)))
   (var grown (persimmon/set))
   (for i 0 100
     (set grown (persimmon/conj grown i)))
-  (var pruned (persimmon/set (numbers 200)))
+  (var pruned (persimmon/set ;(numbers 200)))
   (for i 100 200
     (set pruned (persimmon/disj pruned i)))
   (is (== (persimmon/to-array direct) (persimmon/to-array grown)))
@@ -170,17 +190,17 @@
 
 (deftest stringifying-a-set
   (is (= "#{}" (string (persimmon/set))))
-  (is (= "#{a}" (string (persimmon/set [:a])))))
+  (is (= "#{a}" (string (persimmon/set :a)))))
 
 
 (deftest hashing-with-equivalent-sets
-  (def h1 (hash (persimmon/set [:a :b])))
-  (def h2 (hash (persimmon/set [:b :a])))
+  (def h1 (hash (persimmon/set :a :b)))
+  (def h2 (hash (persimmon/set :b :a)))
   (is (= h1 h2)))
 
 
 (deftest hashing-does-not-depend-on-how-a-set-was-built
-  (def direct (persimmon/set (numbers 100)))
+  (def direct (persimmon/set ;(numbers 100)))
   (var grown (persimmon/set))
   (for i 0 100
     (set grown (persimmon/conj grown i)))
@@ -188,13 +208,13 @@
 
 
 (deftest hashing-with-different-sets
-  (def h1 (hash (persimmon/set [:a :b])))
-  (def h2 (hash (persimmon/set [:a :c])))
+  (def h1 (hash (persimmon/set :a :b)))
+  (def h2 (hash (persimmon/set :a :c)))
   (is (not (= h1 h2))))
 
 
 (deftest elements-of-every-type
-  (def s (persimmon/set [:kw "str" 'sym 42 true [1 2]]))
+  (def s (persimmon/set :kw "str" 'sym 42 true [1 2]))
   (is (= 6 (length s)))
   (is (= true (persimmon/has-key? s :kw)))
   (is (= true (persimmon/has-key? s "str")))
@@ -207,14 +227,14 @@
 # The collector reaches a set's elements only through its mark callback, so
 # anything it misses is freed while the set still holds it.
 (deftest a-set-survives-a-collection
-  (def s (persimmon/set (numbers 1100)))
+  (def s (persimmon/set ;(numbers 1100)))
   (gccollect)
   (is (= 1100 (length s)))
   (is (== (numbers 1100) (elements s))))
 
 
 (deftest a-shared-set-survives-its-original
-  (var s1 (persimmon/set (numbers 1100)))
+  (var s1 (persimmon/set ;(numbers 1100)))
   (def s2 (persimmon/conj s1 2000))
   (set s1 nil)
   (gccollect)
@@ -224,16 +244,16 @@
 
 (deftest comparing-equivalent-sets
   (is (= (persimmon/set) (persimmon/set)))
-  (is (= (persimmon/set [:a :b]) (persimmon/set [:b :a])))
-  (is (deep= (persimmon/set [:a]) (persimmon/set [:a]))))
+  (is (= (persimmon/set :a :b) (persimmon/set :b :a)))
+  (is (deep= (persimmon/set :a) (persimmon/set :a))))
 
 
 (deftest comparing-sets-built-differently
-  (def direct (persimmon/set (numbers 100)))
+  (def direct (persimmon/set ;(numbers 100)))
   (var grown (persimmon/set))
   (for i 0 100
     (set grown (persimmon/conj grown i)))
-  (var pruned (persimmon/set (numbers 200)))
+  (var pruned (persimmon/set ;(numbers 200)))
   (for i 100 200
     (set pruned (persimmon/disj pruned i)))
   (is (= direct grown))
@@ -241,13 +261,13 @@
 
 
 (deftest comparing-different-sets
-  (is (not (= (persimmon/set [:a :b]) (persimmon/set [:a :c]))))
-  (is (not (= (persimmon/set [:a]) (persimmon/set [:a :b])))))
+  (is (not (= (persimmon/set :a :b) (persimmon/set :a :c))))
+  (is (not (= (persimmon/set :a) (persimmon/set :a :b)))))
 
 
 (deftest comparing-sets-across-multiple-levels
-  (def set1 (persimmon/set (numbers 1100)))
-  (is (= set1 (persimmon/set (numbers 1100))))
+  (def set1 (persimmon/set ;(numbers 1100)))
+  (is (= set1 (persimmon/set ;(numbers 1100))))
   (is (not (= set1 (persimmon/disj set1 1099)))))
 
 
@@ -258,13 +278,13 @@
 
 (deftest a-set-as-a-table-key
   (def t @{})
-  (put t (persimmon/set [:a]) :found)
-  (is (= :found (get t (persimmon/set [:a]))))
-  (is (= nil (get t (persimmon/set [:b])))))
+  (put t (persimmon/set :a) :found)
+  (is (= :found (get t (persimmon/set :a))))
+  (is (= nil (get t (persimmon/set :b)))))
 
 
 (deftest marshalling-a-set
-  (def set1 (persimmon/set [:a :b]))
+  (def set1 (persimmon/set :a :b))
   (def set2 (unmarshal (marshal set1)))
   (is (= set1 set2))
   (is (= true (persimmon/has-key? set2 :a)))
@@ -277,7 +297,7 @@
 
 
 (deftest marshalling-a-set-across-multiple-levels
-  (def set1 (persimmon/set (numbers 1100)))
+  (def set1 (persimmon/set ;(numbers 1100)))
   (def set2 (unmarshal (marshal set1)))
   (is (= set1 set2))
   (is (= (hash set1) (hash set2)))
@@ -285,7 +305,7 @@
 
 
 (deftest a-set-read-back-survives-a-collection
-  (def s (unmarshal (marshal (persimmon/set (numbers 1100)))))
+  (def s (unmarshal (marshal (persimmon/set ;(numbers 1100)))))
   (gccollect)
   (is (= 1100 (length s)))
   (is (== (numbers 1100) (elements s))))
