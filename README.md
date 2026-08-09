@@ -102,8 +102,7 @@ typedef struct {
 /* used by maps and sets */
 typedef struct {
     uint32_t (*hash)(const void *key, size_t key_size, void *ctx);
-    bool (*equals)(const void *key_a, const void *key_b, size_t key_size,
-                   void *ctx);
+    bool (*equals)(const void *key_a, const void *key_b, size_t key_size, void *ctx);
     void (*retain)(const void *slot, void *ctx);
     void (*release)(const void *slot, void *ctx);
     void (*trace)(const void *slot, void *ctx);
