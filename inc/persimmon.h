@@ -11,7 +11,11 @@
  * opaque byte blobs of a fixed size, stored inline in the collection, and their
  * lifecycle is delegated to a table of callbacks supplied at initialisation.
  *
- * Elements must not require an alignment stricter than max_align_t.
+ * Element storage is aligned suitably for `long long`, `long double` and
+ * `void *`. Other types are supported only when their implementation-defined
+ * alignment is no stricter than the strictest of those three. Persimmon does
+ * not support implementation-specific or explicitly over-aligned types whose
+ * requirements exceed that guarantee.
  */
 
 /* Status Codes */
@@ -61,6 +65,12 @@ typedef void (*persimm_visit_fn)(const void *slot, size_t position, void *ctx);
  * entry out and describes its exact representation here. The key occupies the
  * first `key_size` bytes, so a pointer to an entry is also a pointer to its key.
  * `value_size` is zero for a set, whose entries are keys and nothing more.
+ *
+ * `entry_size` must preserve the entry's alignment from one inline slot to the
+ * next, and `value_offset` must satisfy the value's alignment. Using
+ * `sizeof(entry_type)` and `offsetof(entry_type, value_member)` provides those
+ * properties for an ordinary C struct whose alignment meets the library-wide
+ * guarantee above.
  */
 typedef struct {
     size_t entry_size;   // the stride from one entry to the next
@@ -288,7 +298,9 @@ persimm_status persimm_set_transient_persist(persimm_set_transient_t *transient,
 
 /*
  * Prepares a vector for use. `elem_size` must be non-zero. `ops` and `ctx` may
- * be NULL. The vector is left safe to deinitialise even if this fails.
+ * be NULL. `elem_size` must preserve the element type's alignment between
+ * consecutive inline slots; `sizeof(element_type)` does so. The vector is left
+ * safe to deinitialise even if this fails.
  */
 persimm_status persimm_vector_init(persimm_vector_t *vector, size_t elem_size,
                                    const persimm_elem_ops *ops, void *ctx);
@@ -340,8 +352,8 @@ void persimm_vector_trace(const persimm_vector_t *vector);
 
 /*
  * Prepares an empty list for use. `elem_size` must be non-zero. `ops` and `ctx`
- * may be NULL. Unlike a vector, a list allocates nothing until something is
- * consed onto it.
+ * may be NULL; `sizeof(element_type)` is the usual size. Unlike a vector, a list
+ * allocates nothing until something is consed onto it.
  */
 persimm_status persimm_list_init(persimm_list_t *list, size_t elem_size,
                                  const persimm_elem_ops *ops, void *ctx);
@@ -500,7 +512,8 @@ void persimm_map_trace(const persimm_map_t *map);
 
 /*
  * Prepares an empty set for use. `elem_size` must be non-zero; `key_ops` and
- * `key_ctx` may be NULL.
+ * `key_ctx` may be NULL. `elem_size` must preserve the element type's alignment
+ * between consecutive inline slots; `sizeof(element_type)` does so.
  */
 persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size,
                                 const persimm_key_ops *key_ops, void *key_ctx);
