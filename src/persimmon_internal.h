@@ -4,6 +4,29 @@
 #include <string.h>
 #include "persimmon.h"
 
+/* Allocation */
+
+/* Core-only tests replace allocation so that every failure path can be
+ * exercised. Normal builds continue to call the C allocator directly. */
+#if defined(PERSIMM_TEST_ALLOC)
+void *persimm_test_calloc(size_t count, size_t size);
+void persimm_test_free(void *ptr);
+#define calloc persimm_test_calloc
+#define free persimm_test_free
+#endif
+
+static inline bool persimm_size_add(size_t a, size_t b, size_t *result) {
+    if (a > SIZE_MAX - b) return false;
+    *result = a + b;
+    return true;
+}
+
+static inline bool persimm_size_mul(size_t a, size_t b, size_t *result) {
+    if (0 != a && b > SIZE_MAX / a) return false;
+    *result = a * b;
+    return true;
+}
+
 /*
  * Shared by the implementation of each structure. Not installed and not part
  * of the library's interface.

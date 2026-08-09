@@ -121,6 +121,8 @@ typedef struct {
  */
 typedef struct {
     size_t count;
+    /* Distinguishes structural versions for host-owned cursors. */
+    size_t generation;
     size_t elem_size;
     const persimm_elem_ops *ops;
     void *ctx;
@@ -138,11 +140,12 @@ typedef struct {
  * across threads gives each thread its own cursor.
  *
  * Treat the fields as opaque. A cursor is safe to point at any list, or at a
- * list that has since changed: it notices and starts again from the head.
+ * list that has since changed: it notices the structural generation and starts
+ * again from the head.
  */
 typedef struct {
     const persimm_list_t *list;
-    size_t count;
+    size_t generation;
     size_t index;
     persimm_list_cell_t *cell;
 } persimm_list_cursor_t;

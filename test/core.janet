@@ -53,7 +53,7 @@
   (os/mkdir (path "_build"))
   (def sanitise? (os/getenv "PERSIMMON_SANITISE"))
   (def cmd (array/concat
-             @[cc "-std=c99" "-Wall" "-Wextra"]
+             @[cc "-std=c99" "-Wall" "-Wextra" "-DPERSIMM_TEST_ALLOC"]
              (if sanitise?
                # Without no-sanitize-recover the undefined behaviour sanitiser
                # reports and carries on, which would let a finding pass as green.

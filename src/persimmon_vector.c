@@ -71,8 +71,13 @@ static persimm_vector_node_t *persimm_vector_node_new(persimm_vector_node_type k
                                                       size_t elem_size) {
     size_t stride = (kind == PERSIMM_VECTOR_NODE_INNER) ? sizeof(persimm_vector_node_t *)
                                                         : elem_size;
-    persimm_vector_node_t *node =
-        calloc(1, offsetof(struct persimm_vector_node, data) + (PERSIMM_WIDTH * stride));
+    size_t data_bytes;
+    size_t bytes;
+    if (!persimm_size_mul(PERSIMM_WIDTH, stride, &data_bytes) ||
+        !persimm_size_add(offsetof(struct persimm_vector_node, data), data_bytes, &bytes)) {
+        return NULL;
+    }
+    persimm_vector_node_t *node = calloc(1, bytes);
     if (NULL == node) return NULL;
     node->kind = kind;
     PERSIMM_RC_SET(node->ref_count, 1);
@@ -165,9 +170,16 @@ void *persimm_vector_ref(const persimm_vector_t *vector, size_t index) {
 }
 
 bool persimm_vector_index(const persimm_vector_t *vector, int64_t input, size_t *index) {
-    int64_t length = (int64_t)vector->count;
-    if ((length + input) < 0 || input >= length) return false;
-    *index = (size_t)((input < 0) ? (length + input) : input);
+    if (input >= 0) {
+        uint64_t position = (uint64_t)input;
+        if (position >= vector->count) return false;
+        *index = (size_t)position;
+        return true;
+    }
+
+    uint64_t distance = (uint64_t)(-(input + 1)) + 1;
+    if (distance > vector->count) return false;
+    *index = vector->count - (size_t)distance;
     return true;
 }
 
@@ -278,6 +290,7 @@ persimm_status persimm_vector_update(persimm_vector_t *vector, size_t index, con
             vector->tail = tail;
         }
         void *slot = persimm_vector_node_slot(vector->tail, index - tail_offset, vector->elem_size);
+        if (elem == slot) return PERSIMM_OK;
         persimm_elem_release(vector->ops, vector->ctx, slot);
         persimm_elem_store(vector, slot, elem);
         return PERSIMM_OK;
@@ -308,6 +321,7 @@ persimm_status persimm_vector_update(persimm_vector_t *vector, size_t index, con
     }
 
     void *slot = persimm_vector_node_slot(node, index & PERSIMM_MASK, vector->elem_size);
+    if (elem == slot) return PERSIMM_OK;
     persimm_elem_release(vector->ops, vector->ctx, slot);
     persimm_elem_store(vector, slot, elem);
 

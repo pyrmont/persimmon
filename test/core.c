@@ -5,7 +5,7 @@
 
 /*
  * Exercises the core through its own interface, with no host language
- * involved. Two things the Janet suite cannot reach live here.
+ * involved. Several things the Janet suite cannot reach live here.
  *
  * The first is collision nodes. A trie only builds one for keys whose hashes
  * agree in all 32 bits, and nothing a Janet test can write will make
@@ -19,6 +19,10 @@
  * shared and the hand-over when a collapsed subtree is pulled back into its
  * parent, is therefore untested from Janet's side. The host below counts every
  * element it is handed and checks the books balance.
+ *
+ * Allocation is also replaceable in this test build, so each point along
+ * representative trie updates can fail in turn and prove it leaks no partial
+ * path and leaves the original structure untouched.
  *
  * Building this at all is worth something on its own: it includes no host
  * header, so the core failing to be host-agnostic is a link error.
@@ -34,6 +38,36 @@ static int failures = 0;
         failures++;                               \
     }                                             \
 } while (0)
+
+/* Allocation Failure Injection */
+
+#if defined(PERSIMM_TEST_ALLOC)
+static size_t allocated_blocks = 0;
+static int allocations_before_failure = -1;
+
+void *persimm_test_calloc(size_t count, size_t size) {
+    if (0 == allocations_before_failure) return NULL;
+    if (allocations_before_failure > 0) allocations_before_failure--;
+    void *ptr = calloc(count, size);
+    if (NULL != ptr) allocated_blocks++;
+    return ptr;
+}
+
+void persimm_test_free(void *ptr) {
+    if (NULL == ptr) return;
+    CHECK(allocated_blocks > 0, "allocator: freed more blocks than were allocated");
+    if (allocated_blocks > 0) allocated_blocks--;
+    free(ptr);
+}
+
+static void fail_allocation_after(int successful) {
+    allocations_before_failure = successful;
+}
+
+static void allow_allocations(void) {
+    allocations_before_failure = -1;
+}
+#endif
 
 /* Entries */
 
@@ -77,6 +111,15 @@ static bool int_equals(const void *key_a, const void *key_b, size_t key_size, vo
 
 static const persimm_key_ops spread_ops = { int_hash, int_equals };
 static const persimm_key_ops crowded_ops = { crowded_hash, int_equals };
+
+static uint32_t zero_hash(const void *key, size_t key_size, void *ctx) {
+    (void) key;
+    (void) key_size;
+    (void) ctx;
+    return 0;
+}
+
+static const persimm_key_ops zero_hash_ops = { zero_hash, NULL };
 
 /* Traversing */
 
@@ -484,6 +527,221 @@ static void test_rejects_a_bad_layout(void) {
     persimm_set_deinit(&set);
 }
 
+/* Defensive Edges */
+
+static void test_extreme_indexes(void) {
+    size_t index = 99;
+    int value = 7;
+
+    persimm_vector_t vector;
+    CHECK(PERSIMM_OK == persimm_vector_init(&vector, sizeof(value), NULL, NULL),
+          "index: vector init failed");
+    CHECK(PERSIMM_OK == persimm_vector_push(&vector, &value, false),
+          "index: vector push failed");
+    CHECK(!persimm_vector_index(&vector, INT64_MAX, &index),
+          "index: vector accepted INT64_MAX");
+    CHECK(!persimm_vector_index(&vector, INT64_MIN, &index),
+          "index: vector accepted INT64_MIN");
+    CHECK(persimm_vector_index(&vector, -1, &index) && 0 == index,
+          "index: vector rejected -1");
+    persimm_vector_deinit(&vector);
+
+    persimm_list_t list;
+    CHECK(PERSIMM_OK == persimm_list_init(&list, sizeof(value), NULL, NULL),
+          "index: list init failed");
+    CHECK(PERSIMM_OK == persimm_list_cons(&list, &value), "index: list cons failed");
+    CHECK(!persimm_list_index(&list, INT64_MAX, &index), "index: list accepted INT64_MAX");
+    CHECK(!persimm_list_index(&list, INT64_MIN, &index), "index: list accepted INT64_MIN");
+    CHECK(persimm_list_index(&list, -1, &index) && 0 == index, "index: list rejected -1");
+    persimm_list_deinit(&list);
+}
+
+static void test_cursor_survives_same_count_change(void) {
+    persimm_list_t list;
+    persimm_list_cursor_t cursor;
+    persimm_list_init(&list, sizeof(int), NULL, NULL);
+    persimm_list_cursor_reset(&cursor);
+
+    int tail = 1;
+    int head = 2;
+    int replacement = 3;
+    persimm_list_cons(&list, &tail);
+    persimm_list_cons(&list, &head);
+
+    int *seen = (int *)persimm_list_ref_from(&list, &cursor, 0);
+    CHECK(NULL != seen && 2 == *seen, "cursor: initial head was wrong");
+
+    persimm_list_rest(&list);
+    persimm_list_cons(&list, &replacement);
+    seen = (int *)persimm_list_ref_from(&list, &cursor, 0);
+    CHECK(NULL != seen && 3 == *seen, "cursor: reused a stale cell after rest and cons");
+    seen = (int *)persimm_list_ref_from(&list, &cursor, 1);
+    CHECK(NULL != seen && 1 == *seen, "cursor: stale traversal lost the tail");
+
+    persimm_list_deinit(&list);
+}
+
+static void test_replacement_may_alias_storage(void) {
+    memset(live, 0, sizeof(live));
+    rc_underflows = 0;
+
+    persimm_vector_t vector;
+    int value = 17;
+    persimm_vector_init(&vector, sizeof(value), &rc_ops, NULL);
+    persimm_vector_push(&vector, &value, false);
+    void *stored = persimm_vector_ref(&vector, 0);
+    CHECK(PERSIMM_OK == persimm_vector_update(&vector, 0, stored, true),
+          "alias: vector rejected its stored element");
+    CHECK(1 == live[value] && 0 == rc_underflows,
+          "alias: vector released its replacement before retaining it");
+    persimm_vector_deinit(&vector);
+
+    persimm_map_t map;
+    entry_t entry = { 23, RC_VALUE_BASE + 23 };
+    persimm_map_init(&map, &map_layout, &rc_ops, &spread_ops, NULL);
+    persimm_map_assoc(&map, &entry, false);
+    stored = persimm_map_ref_entry(&map, &entry.key);
+    CHECK(PERSIMM_OK == persimm_map_assoc(&map, stored, false),
+          "alias: map rejected its stored entry");
+    CHECK(1 == live[entry.key] && 1 == live[entry.value] && 0 == rc_underflows,
+          "alias: map released its replacement before retaining it");
+    persimm_map_deinit(&map);
+
+    check_live("alias", "once the structures went", 0, 0);
+}
+
+static void test_rejects_overflowing_allocations(void) {
+    int value = 1;
+    persimm_vector_t vector;
+    CHECK(PERSIMM_ERR_ALLOC == persimm_vector_init(&vector, SIZE_MAX, NULL, NULL),
+          "allocation: vector size overflow was accepted");
+    persimm_vector_deinit(&vector);
+
+    persimm_list_t list;
+    CHECK(PERSIMM_OK == persimm_list_init(&list, SIZE_MAX, NULL, NULL),
+          "allocation: list init unexpectedly failed");
+    CHECK(PERSIMM_ERR_ALLOC == persimm_list_cons(&list, &value),
+          "allocation: list size overflow was accepted");
+    persimm_list_deinit(&list);
+
+    persimm_entry_layout huge = { SIZE_MAX, 1, 0, 0 };
+    persimm_map_t map;
+    CHECK(PERSIMM_OK == persimm_map_init(&map, &huge, NULL, &zero_hash_ops, NULL),
+          "allocation: huge map layout was rejected before use");
+    CHECK(PERSIMM_ERR_ALLOC == persimm_map_assoc(&map, &value, false),
+          "allocation: map size overflow was accepted");
+    persimm_map_deinit(&map);
+
+    persimm_set_t set;
+    CHECK(PERSIMM_OK == persimm_set_init(&set, SIZE_MAX, NULL, &zero_hash_ops, NULL),
+          "allocation: huge set layout was rejected before use");
+    CHECK(PERSIMM_ERR_ALLOC == persimm_set_conj(&set, &value, false),
+          "allocation: set size overflow was accepted");
+    persimm_set_deinit(&set);
+}
+
+#if defined(PERSIMM_TEST_ALLOC)
+static void build_fault_map(persimm_map_t *map, const persimm_key_ops *ops) {
+    persimm_map_init(map, &map_layout, NULL, ops, NULL);
+    for (int i = 0; i < 64; i++) {
+        entry_t entry = { i, i };
+        CHECK(PERSIMM_OK == persimm_map_assoc(map, &entry, false),
+              "allocation: could not build fault-test map");
+    }
+}
+
+static void test_assoc_allocation_failures(void) {
+    bool reached_success = false;
+    for (int fail = 0; fail < 32 && !reached_success; fail++) {
+        persimm_map_t base;
+        persimm_map_t copy;
+        build_fault_map(&base, &spread_ops);
+        persimm_map_clone(&base, &copy);
+
+        entry_t fresh = { 1000, 1000 };
+        fail_allocation_after(fail);
+        persimm_status status = persimm_map_assoc(&copy, &fresh, true);
+        allow_allocations();
+
+        if (PERSIMM_ERR_ALLOC == status) {
+            CHECK(copy.count == base.count && !persimm_map_has(&copy, &fresh.key),
+                  "allocation: failed assoc changed the map");
+        } else {
+            CHECK(PERSIMM_OK == status, "allocation: assoc returned an unexpected status");
+            reached_success = true;
+        }
+
+        persimm_map_deinit(&copy);
+        persimm_map_deinit(&base);
+        CHECK(0 == allocated_blocks, "allocation: assoc failure leaked %zu blocks",
+              allocated_blocks);
+    }
+    CHECK(reached_success, "allocation: assoc did not succeed after all failure points");
+}
+
+static void test_dissoc_allocation_failures(void) {
+    bool reached_success = false;
+    for (int fail = 0; fail < 32 && !reached_success; fail++) {
+        persimm_map_t base;
+        persimm_map_t copy;
+        build_fault_map(&base, &spread_ops);
+        persimm_map_clone(&base, &copy);
+
+        int victim = 17;
+        fail_allocation_after(fail);
+        persimm_status status = persimm_map_dissoc(&copy, &victim, true);
+        allow_allocations();
+
+        if (PERSIMM_ERR_ALLOC == status) {
+            CHECK(copy.count == base.count && persimm_map_has(&copy, &victim),
+                  "allocation: failed dissoc changed the map");
+        } else {
+            CHECK(PERSIMM_OK == status, "allocation: dissoc returned an unexpected status");
+            reached_success = true;
+        }
+
+        persimm_map_deinit(&copy);
+        persimm_map_deinit(&base);
+        CHECK(0 == allocated_blocks, "allocation: dissoc failure leaked %zu blocks",
+              allocated_blocks);
+    }
+    CHECK(reached_success, "allocation: dissoc did not succeed after all failure points");
+}
+
+static void test_collision_reparent_allocation_failures(void) {
+    bool reached_success = false;
+    for (int fail = 0; fail < 32 && !reached_success; fail++) {
+        persimm_map_t base;
+        persimm_map_t copy;
+        persimm_map_init(&base, &map_layout, NULL, &crowded_ops, NULL);
+        entry_t first = { 0, 0 };
+        entry_t second = { 4, 4 };
+        persimm_map_assoc(&base, &first, false);
+        persimm_map_assoc(&base, &second, false);
+        persimm_map_clone(&base, &copy);
+
+        entry_t fresh = { 1, 1 };
+        fail_allocation_after(fail);
+        persimm_status status = persimm_map_assoc(&copy, &fresh, true);
+        allow_allocations();
+
+        if (PERSIMM_ERR_ALLOC == status) {
+            CHECK(2 == copy.count && !persimm_map_has(&copy, &fresh.key),
+                  "allocation: failed collision assoc changed the map");
+        } else {
+            CHECK(PERSIMM_OK == status, "allocation: collision assoc returned a bad status");
+            reached_success = true;
+        }
+
+        persimm_map_deinit(&copy);
+        persimm_map_deinit(&base);
+        CHECK(0 == allocated_blocks, "allocation: collision assoc leaked %zu blocks",
+              allocated_blocks);
+    }
+    CHECK(reached_success, "allocation: collision assoc never reached success");
+}
+#endif
+
 /* Running */
 
 int main(void) {
@@ -522,6 +780,15 @@ int main(void) {
 
     test_byte_defaults();
     test_rejects_a_bad_layout();
+    test_extreme_indexes();
+    test_cursor_survives_same_count_change();
+    test_replacement_may_alias_storage();
+    test_rejects_overflowing_allocations();
+#if defined(PERSIMM_TEST_ALLOC)
+    test_assoc_allocation_failures();
+    test_dissoc_allocation_failures();
+    test_collision_reparent_allocation_failures();
+#endif
 
     if (failures > 0) {
         printf("%d checks failed\n", failures);

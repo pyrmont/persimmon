@@ -50,7 +50,9 @@ void persimm_list_deinit(persimm_list_t *list) {
 /* Initialising */
 
 static persimm_list_cell_t *persimm_list_cell_new(size_t elem_size) {
-    persimm_list_cell_t *cell = calloc(1, offsetof(struct persimm_list_cell, data) + elem_size);
+    size_t bytes;
+    if (!persimm_size_add(offsetof(struct persimm_list_cell, data), elem_size, &bytes)) return NULL;
+    persimm_list_cell_t *cell = calloc(1, bytes);
     if (NULL == cell) return NULL;
     PERSIMM_RC_SET(cell->ref_count, 1);
     return cell;
@@ -59,6 +61,7 @@ static persimm_list_cell_t *persimm_list_cell_new(size_t elem_size) {
 persimm_status persimm_list_init(persimm_list_t *list, size_t elem_size,
                                  const persimm_elem_ops *ops, void *ctx) {
     list->count = 0;
+    list->generation = 0;
     list->elem_size = elem_size;
     list->ops = ops;
     list->ctx = ctx;
@@ -71,6 +74,7 @@ persimm_status persimm_list_init(persimm_list_t *list, size_t elem_size,
 
 void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest) {
     dest->count = src->count;
+    dest->generation = src->generation;
     dest->elem_size = src->elem_size;
     dest->ops = src->ops;
     dest->ctx = src->ctx;
@@ -100,7 +104,7 @@ void *persimm_list_ref(const persimm_list_t *list, size_t index) {
 
 void persimm_list_cursor_reset(persimm_list_cursor_t *cursor) {
     cursor->list = NULL;
-    cursor->count = 0;
+    cursor->generation = 0;
     cursor->index = 0;
     cursor->cell = NULL;
 }
@@ -112,11 +116,11 @@ void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *c
     persimm_list_cell_t *cell = list->head;
     size_t position = 0;
 
-    /* The count is part of the test so that a cursor kept across a change to
-       the list it came from starts again rather than reading a stale cell. */
+    /* The generation notices changes even when a run of operations restores
+       the old count. */
     if (NULL != cursor->cell &&
         cursor->list == list &&
-        cursor->count == list->count &&
+        cursor->generation == list->generation &&
         cursor->index <= index) {
         cell = cursor->cell;
         position = cursor->index;
@@ -129,7 +133,7 @@ void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *c
     if (NULL == cell) return NULL;
 
     cursor->list = list;
-    cursor->count = list->count;
+    cursor->generation = list->generation;
     cursor->index = index;
     cursor->cell = cell;
 
@@ -137,9 +141,16 @@ void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *c
 }
 
 bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index) {
-    int64_t length = (int64_t)list->count;
-    if ((length + input) < 0 || input >= length) return false;
-    *index = (size_t)((input < 0) ? (length + input) : input);
+    if (input >= 0) {
+        uint64_t position = (uint64_t)input;
+        if (position >= list->count) return false;
+        *index = (size_t)position;
+        return true;
+    }
+
+    uint64_t distance = (uint64_t)(-(input + 1)) + 1;
+    if (distance > list->count) return false;
+    *index = list->count - (size_t)distance;
     return true;
 }
 
@@ -156,6 +167,7 @@ persimm_status persimm_list_cons(persimm_list_t *list, const void *elem) {
     cell->next = list->head;
     list->head = cell;
     list->count++;
+    list->generation++;
 
     return PERSIMM_OK;
 }
@@ -175,6 +187,7 @@ persimm_status persimm_list_rest(persimm_list_t *list) {
 
     list->head = next;
     list->count--;
+    list->generation++;
 
     return PERSIMM_OK;
 }

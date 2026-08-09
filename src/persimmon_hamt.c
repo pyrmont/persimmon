@@ -193,12 +193,22 @@ void persimm_hamt_release(persimm_hamt_node_t *node, const persimm_hamt_t *hamt)
 
 static persimm_hamt_node_t *persimm_hamt_node_new(uint32_t kind, uint32_t data_count,
                                                   uint32_t child_count, size_t entry_size) {
-    size_t bytes = (size_t)data_count * entry_size;
+    size_t bytes;
+    if (!persimm_size_mul((size_t)data_count, entry_size, &bytes)) return NULL;
+
     if (child_count > 0) {
-        bytes = PERSIMM_ALIGN_UP(bytes) + ((size_t)child_count * sizeof(persimm_hamt_node_t *));
+        if (bytes > SIZE_MAX - (PERSIMM_ALIGNMENT - 1)) return NULL;
+        bytes = PERSIMM_ALIGN_UP(bytes);
+
+        size_t child_bytes;
+        if (!persimm_size_mul((size_t)child_count, sizeof(persimm_hamt_node_t *), &child_bytes) ||
+            !persimm_size_add(bytes, child_bytes, &bytes)) {
+            return NULL;
+        }
     }
 
-    persimm_hamt_node_t *node = calloc(1, offsetof(struct persimm_hamt_node, data) + bytes);
+    if (!persimm_size_add(offsetof(struct persimm_hamt_node, data), bytes, &bytes)) return NULL;
+    persimm_hamt_node_t *node = calloc(1, bytes);
     if (NULL == node) return NULL;
 
     node->kind = kind;
@@ -269,8 +279,10 @@ static persimm_hamt_node_t *persimm_hamt_with_value(persimm_hamt_node_t *node, u
 
     if (!immutable && 1 == PERSIMM_RC_LOAD(node->ref_count)) {
         void *slot = persimm_hamt_value(hamt, persimm_hamt_entry(node, index, entry_size));
+        void *replacement = persimm_hamt_value(hamt, (void *)entry);
+        if (replacement == slot) return node;
         persimm_elem_release(hamt->ops, hamt->ctx, slot);
-        memcpy(slot, persimm_hamt_value(hamt, (void *)entry), value_size);
+        memcpy(slot, replacement, value_size);
         persimm_elem_retain(hamt->ops, hamt->ctx, slot);
         return node;
     }
@@ -307,6 +319,8 @@ static persimm_hamt_node_t *persimm_hamt_with_entry(persimm_hamt_node_t *node, u
     size_t entry_size = hamt->layout.entry_size;
     uint32_t data_count = persimm_hamt_data_count(node);
     uint32_t child_count = persimm_hamt_child_count(node);
+
+    if (UINT32_MAX == data_count) return NULL;
 
     persimm_hamt_node_t *copy = persimm_hamt_node_new(node->kind, data_count + 1, child_count,
                                                       entry_size);
@@ -592,7 +606,14 @@ static persimm_hamt_node_t *persimm_hamt_node_assoc(persimm_hamt_node_t *node, s
         if (NULL == parent) return NULL;
         parent->nodemap = persimm_hamt_bit(node->hash, shift);
         persimm_hamt_children(parent, entry_size)[0] = node;
-        return persimm_hamt_node_assoc(parent, shift, hash, entry, hamt, immutable, added);
+        persimm_hamt_node_t *result =
+            persimm_hamt_node_assoc(parent, shift, hash, entry, hamt, immutable, added);
+        if (NULL == result) {
+            /* The caller still owns node when the operation fails. Parent's
+             * temporary reference was a transfer only if the update commits. */
+            free(parent);
+        }
+        return result;
     }
 
     uint32_t bit = persimm_hamt_bit(hash, shift);
@@ -632,7 +653,10 @@ static persimm_hamt_node_t *persimm_hamt_node_assoc(persimm_hamt_node_t *node, s
             return NULL;
         }
 
-        return persimm_hamt_with_child(node, index, updated, hamt, immutable);
+        persimm_hamt_node_t *result =
+            persimm_hamt_with_child(node, index, updated, hamt, immutable);
+        if (NULL == result) persimm_hamt_release(updated, hamt);
+        return result;
     }
 
     *added = true;
@@ -726,7 +750,10 @@ static persimm_hamt_node_t *persimm_hamt_node_dissoc(persimm_hamt_node_t *node, 
             return result;
         }
 
-        return persimm_hamt_with_child(node, index, updated, hamt, immutable);
+        persimm_hamt_node_t *result =
+            persimm_hamt_with_child(node, index, updated, hamt, immutable);
+        if (NULL == result) persimm_hamt_release(updated, hamt);
+        return result;
     }
 
     return node;

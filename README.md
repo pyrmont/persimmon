@@ -28,10 +28,11 @@ a tail buffer so that repeated appends usually touch nothing but the last node.
 
 The list is a cons list, so two lists share every cell from their first common
 element onwards and prepending costs one cell however long the list is.
-Indexing a list is linear. Iterating one is not: each list keeps a cursor that
+Indexing a list is linear. Iterating one is not: a host can keep a cursor that
 lets a read resume from where the last one stopped, so walking a list front to
-back costs one step per element. An index behind the cursor, or into a
-different list, simply starts again from the head.
+back costs one step per element. An index behind the cursor, into a different
+list, or into a list changed since the cursor was used simply starts again from
+the head.
 
 The map is a compressed hash-array mapped prefix-tree (i.e. CHAMP) trie. Five
 bits of a key's hash choose a slot at each level, and a node carries two
@@ -208,11 +209,10 @@ $ jeep test
 
 Most of the tests exercise the Janet binding, but `test/core.janet` compiles
 `test/core.c` against the core alone and runs what comes out. Those checks
-cover the two things the binding cannot reach. The first is collision nodes,
-which only appear for keys whose hashes agree in all 32 bits and so need a
-hash that collides to order. The second is `retain` and `release`, which
-Janet never calls because it traces instead, leaving everything a reference
-counting host depends on otherwise untested.
+cover collision nodes, which need a deliberately colliding hash to exercise;
+`retain` and `release`, which Janet never calls because it traces instead; and
+allocation failure, injected at each point along representative trie updates
+to check that the original remains intact and no partial path leaks.
 
 Building those checks at all is worth something on its own: they include no
 Janet header, so the core failing to be host-agnostic is a link error.
@@ -226,6 +226,16 @@ $ PERSIMMON_SANITISE=1 jeep test
 
 The checks are skipped, with a notice, where no C compiler can be found. Set
 `CC` to name one.
+
+The core also has a standalone throughput benchmark. It is kept out of the
+test suite so timing never decides whether a correctness check passes:
+
+```console
+$ janet res/bench/core.janet
+```
+
+Run it several times on an otherwise idle machine when comparing revisions.
+Set `PERSIMMON_BENCH_SCALE` to an integer from 1 to 100 to lengthen every run.
 
 ## Bugs
 
