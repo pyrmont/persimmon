@@ -154,11 +154,13 @@ static inline uint32_t persimm_popcount(uint32_t x) {
 
 /* Elements */
 
-static inline void persimm_elem_retain(const persimm_elem_ops *ops, void *ctx, void *slot) {
+static inline void persimm_elem_retain(const persimm_elem_ops *ops, void *ctx,
+                                       const void *slot) {
     if (NULL != ops && NULL != ops->retain) ops->retain(slot, ctx);
 }
 
-static inline void persimm_elem_release(const persimm_elem_ops *ops, void *ctx, void *slot) {
+static inline void persimm_elem_release(const persimm_elem_ops *ops, void *ctx,
+                                        const void *slot) {
     if (NULL != ops && NULL != ops->release) ops->release(slot, ctx);
 }
 
@@ -199,7 +201,8 @@ void persimm_hamt_release(persimm_hamt_node_t *root, const persimm_hamt_t *hamt)
  * `key_size` bytes of an entry, so the result is also a pointer to the stored
  * key, and the value sits `value_offset` bytes further along.
  */
-void *persimm_hamt_ref(persimm_hamt_node_t *root, const void *key, const persimm_hamt_t *hamt);
+const void *persimm_hamt_ref(persimm_hamt_node_t *root, const void *key,
+                             const persimm_hamt_t *hamt);
 
 /*
  * Stores `entry`, replacing only the value when the key is already present so
@@ -226,7 +229,8 @@ void persimm_hamt_foreach(persimm_hamt_node_t *root, const persimm_hamt_t *hamt,
  * a cursor, so it costs the depth of the trie and needs nothing kept between
  * calls, which is what lets a shared trie be iterated from several places.
  */
-void *persimm_hamt_next(persimm_hamt_node_t *root, const void *key, const persimm_hamt_t *hamt);
+const void *persimm_hamt_next(persimm_hamt_node_t *root, const void *key,
+                              const persimm_hamt_t *hamt);
 
 void persimm_hamt_trace(persimm_hamt_node_t *root, const persimm_hamt_t *hamt);
 

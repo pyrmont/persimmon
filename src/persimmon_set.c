@@ -106,7 +106,7 @@ void persimm_set_deinit(persimm_set_t *set) {
 
 /* Accessing */
 
-void *persimm_set_ref(const persimm_set_t *set, const void *elem) {
+const void *persimm_set_ref(const persimm_set_t *set, const void *elem) {
     persimm_hamt_t hamt;
     persimm_set_hamt(set, &hamt);
     return persimm_hamt_ref(set->root, elem, &hamt);
@@ -174,7 +174,7 @@ void persimm_set_foreach(const persimm_set_t *set, persimm_visit_fn fn, void *ct
     persimm_hamt_foreach(set->root, &hamt, fn, ctx);
 }
 
-void *persimm_set_next(const persimm_set_t *set, const void *elem) {
+const void *persimm_set_next(const persimm_set_t *set, const void *elem) {
     persimm_hamt_t hamt;
     persimm_set_hamt(set, &hamt);
     return persimm_hamt_next(set->root, elem, &hamt);

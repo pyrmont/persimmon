@@ -104,19 +104,19 @@ void persimm_map_deinit(persimm_map_t *map) {
 
 /* Accessing */
 
-void *persimm_map_ref_entry(const persimm_map_t *map, const void *key) {
+const void *persimm_map_ref_entry(const persimm_map_t *map, const void *key) {
     persimm_hamt_t hamt;
     persimm_map_hamt(map, &hamt);
     return persimm_hamt_ref(map->root, key, &hamt);
 }
 
-void *persimm_map_ref(const persimm_map_t *map, const void *key) {
+const void *persimm_map_ref(const persimm_map_t *map, const void *key) {
     if (0 == map->layout.value_size) return NULL;
 
-    void *entry = persimm_map_ref_entry(map, key);
+    const void *entry = persimm_map_ref_entry(map, key);
     if (NULL == entry) return NULL;
 
-    return (unsigned char *)entry + map->layout.value_offset;
+    return (const unsigned char *)entry + map->layout.value_offset;
 }
 
 bool persimm_map_has(const persimm_map_t *map, const void *key) {
@@ -181,7 +181,7 @@ void persimm_map_foreach(const persimm_map_t *map, persimm_visit_fn fn, void *ct
     persimm_hamt_foreach(map->root, &hamt, fn, ctx);
 }
 
-void *persimm_map_next(const persimm_map_t *map, const void *key) {
+const void *persimm_map_next(const persimm_map_t *map, const void *key) {
     persimm_hamt_t hamt;
     persimm_map_hamt(map, &hamt);
     return persimm_hamt_next(map->root, key, &hamt);

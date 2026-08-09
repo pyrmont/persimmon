@@ -29,24 +29,24 @@ const char *persimm_status_string(persimm_status status);
 /* Elements */
 
 /*
- * Each callback receives a pointer to the element's storage slot, not the
- * element itself. A host storing pointers reads through twice, e.g.
- * `Py_DECREF(*(PyObject **)slot)`. Any callback may be NULL, as may the whole
- * table, in which case elements are treated as plain data.
+ * Each callback receives a read-only pointer to the element's storage slot,
+ * not the element itself. A host storing pointers reads through twice, e.g.
+ * `Py_DECREF(*(PyObject *const *)slot)`. Any callback may be NULL, as may the
+ * whole table, in which case elements are treated as plain data.
  *
  * `retain` is called whenever a new reference to an element comes into
  * existence: when one is inserted, and for every live element of a leaf that
  * gets copied for structural sharing. `release` is called symmetrically.
  * `trace` exists for hosts with a tracing collector and is only ever called
- * via persimm_vector_trace.
+ * via the corresponding `*_trace` function.
  */
 typedef struct {
-    void (*retain)(void *slot, void *ctx);
-    void (*release)(void *slot, void *ctx);
-    void (*trace)(void *slot, void *ctx);
+    void (*retain)(const void *slot, void *ctx);
+    void (*release)(const void *slot, void *ctx);
+    void (*trace)(const void *slot, void *ctx);
 } persimm_elem_ops;
 
-typedef void (*persimm_visit_fn)(void *slot, size_t index, void *ctx);
+typedef void (*persimm_visit_fn)(const void *slot, size_t index, void *ctx);
 
 /* Entries */
 
@@ -273,12 +273,11 @@ void persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest);
 void persimm_vector_deinit(persimm_vector_t *vector);
 
 /*
- * Returns a pointer to the storage slot for `index`, or NULL if the index is
- * out of bounds. The pointer is invalidated by any subsequent operation on any
- * vector sharing that storage, so copy the value out rather than holding on to
- * it.
+ * Returns a read-only pointer to the storage slot for `index`, or NULL if the
+ * index is out of bounds. The pointer remains valid until `vector` is
+ * deinitialised.
  */
-void *persimm_vector_ref(const persimm_vector_t *vector, size_t index);
+const void *persimm_vector_ref(const persimm_vector_t *vector, size_t index);
 
 /*
  * Resolves a possibly negative index against the vector, as hosts that count
@@ -331,17 +330,17 @@ void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest);
 void persimm_list_deinit(persimm_list_t *list);
 
 /*
- * Returns a pointer to the head element's storage slot, or NULL if the list is
- * empty. As with a vector, the pointer does not survive later operations.
+ * Returns a read-only pointer to the head element's storage slot, or NULL if
+ * the list is empty. The pointer remains valid until `list` is deinitialised.
  */
-void *persimm_list_first(const persimm_list_t *list);
+const void *persimm_list_first(const persimm_list_t *list);
 
 /*
- * Returns a pointer to the storage slot for `index`, or NULL if the index is
- * out of bounds. This walks the chain from the head, so it is linear in
- * `index`.
+ * Returns a read-only pointer to the storage slot for `index`, or NULL if the
+ * index is out of bounds. The pointer remains valid until `list` is
+ * deinitialised. This walks from the head, so it is linear in `index`.
  */
-void *persimm_list_ref(const persimm_list_t *list, size_t index);
+const void *persimm_list_ref(const persimm_list_t *list, size_t index);
 
 /*
  * Puts a cursor back into its initial state, from which it walks from the
@@ -357,8 +356,8 @@ void persimm_list_cursor_reset(persimm_list_cursor_t *cursor);
  * Indices that go backwards are answered from the head, and so cost no more
  * than persimm_list_ref would.
  */
-void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
-                            size_t index);
+const void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
+                                  size_t index);
 
 bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index);
 
@@ -407,14 +406,14 @@ void persimm_map_clone(const persimm_map_t *src, persimm_map_t *dest);
 void persimm_map_deinit(persimm_map_t *map);
 
 /*
- * Returns a pointer to the storage for `key`'s value, or NULL when the map
- * does not hold the key. As with a vector, the pointer does not survive a
- * later operation on any map sharing that node.
+ * Returns a read-only pointer to the storage for `key`'s value, or NULL when
+ * the map does not hold the key. The pointer remains valid until `map` is
+ * deinitialised.
  *
  * A map whose entries have no value has nothing to return, so ask
  * persimm_map_has instead.
  */
-void *persimm_map_ref(const persimm_map_t *map, const void *key);
+const void *persimm_map_ref(const persimm_map_t *map, const void *key);
 
 /*
  * Returns the whole entry rather than its value, which is what a host wants
@@ -422,7 +421,7 @@ void *persimm_map_ref(const persimm_map_t *map, const void *key);
  * up with. Storing a key that already has an equal counterpart leaves the
  * earlier one in place.
  */
-void *persimm_map_ref_entry(const persimm_map_t *map, const void *key);
+const void *persimm_map_ref_entry(const persimm_map_t *map, const void *key);
 
 bool persimm_map_has(const persimm_map_t *map, const void *key);
 
@@ -457,7 +456,7 @@ void persimm_map_foreach(const persimm_map_t *map, persimm_visit_fn fn, void *ct
  * NULL at the end. Nothing is kept between calls, so a map shared in several
  * places can be walked from each of them at once.
  */
-void *persimm_map_next(const persimm_map_t *map, const void *key);
+const void *persimm_map_next(const persimm_map_t *map, const void *key);
 
 /*
  * Calls the element table's `trace` callback for every key and every value.
@@ -478,11 +477,12 @@ void persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest);
 void persimm_set_deinit(persimm_set_t *set);
 
 /*
- * Returns a pointer to the element the set holds, or NULL. This is the element
- * stored rather than the one looked up with, which is what a host interning
- * values through a set is after.
+ * Returns a read-only pointer to the element the set holds, or NULL. This is
+ * the element stored rather than the one looked up with, which is what a host
+ * interning values through a set is after. The pointer remains valid until
+ * `set` is deinitialised.
  */
-void *persimm_set_ref(const persimm_set_t *set, const void *elem);
+const void *persimm_set_ref(const persimm_set_t *set, const void *elem);
 
 bool persimm_set_has(const persimm_set_t *set, const void *elem);
 
@@ -498,7 +498,7 @@ persimm_status persimm_set_disj(const persimm_set_t *src, const void *elem,
 
 void persimm_set_foreach(const persimm_set_t *set, persimm_visit_fn fn, void *ctx);
 
-void *persimm_set_next(const persimm_set_t *set, const void *elem);
+const void *persimm_set_next(const persimm_set_t *set, const void *elem);
 
 void persimm_set_trace(const persimm_set_t *set);
 

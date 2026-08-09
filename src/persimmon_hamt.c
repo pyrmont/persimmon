@@ -149,6 +149,10 @@ static void *persimm_hamt_value(const persimm_hamt_t *hamt, void *entry) {
     return (unsigned char *)entry + hamt->layout.value_offset;
 }
 
+static const void *persimm_hamt_value_const(const persimm_hamt_t *hamt, const void *entry) {
+    return (const unsigned char *)entry + hamt->layout.value_offset;
+}
+
 static void persimm_hamt_entry_retain(const persimm_hamt_t *hamt, void *entry) {
     persimm_elem_retain(hamt->ops, hamt->ctx, entry);
     if (hamt->layout.value_size > 0) {
@@ -542,7 +546,8 @@ static persimm_hamt_node_t *persimm_hamt_merge(size_t shift, const void *entry_a
 
 /* Accessing */
 
-void *persimm_hamt_ref(persimm_hamt_node_t *root, const void *key, const persimm_hamt_t *hamt) {
+const void *persimm_hamt_ref(persimm_hamt_node_t *root, const void *key,
+                             const persimm_hamt_t *hamt) {
     size_t entry_size = hamt->layout.entry_size;
     uint32_t hash = persimm_hamt_hash_of(hamt, key);
     persimm_hamt_node_t *node = root;
@@ -881,7 +886,8 @@ static persimm_hamt_seek persimm_hamt_node_next(persimm_hamt_node_t *node, size_
     return PERSIMM_HAMT_ABSENT;
 }
 
-void *persimm_hamt_next(persimm_hamt_node_t *root, const void *key, const persimm_hamt_t *hamt) {
+const void *persimm_hamt_next(persimm_hamt_node_t *root, const void *key,
+                              const persimm_hamt_t *hamt) {
     if (NULL == root) return NULL;
     if (NULL == key) return persimm_hamt_node_first(root, hamt);
 
@@ -892,12 +898,12 @@ void *persimm_hamt_next(persimm_hamt_node_t *root, const void *key, const persim
     return out;
 }
 
-static void persimm_hamt_trace_visit(void *slot, size_t index, void *ctx) {
+static void persimm_hamt_trace_visit(const void *slot, size_t index, void *ctx) {
     (void) index;
     const persimm_hamt_t *hamt = (const persimm_hamt_t *)ctx;
     hamt->ops->trace(slot, hamt->ctx);
     if (hamt->layout.value_size > 0) {
-        hamt->ops->trace(persimm_hamt_value(hamt, slot), hamt->ctx);
+        hamt->ops->trace(persimm_hamt_value_const(hamt, slot), hamt->ctx);
     }
 }
 

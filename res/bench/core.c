@@ -94,7 +94,7 @@ static void benchmark_list(void) {
     persimm_list_cursor_reset(&cursor);
     start = clock();
     for (size_t i = 0; i < count; i++) {
-        int *value = (int *)persimm_list_ref_from(&list, &cursor, i);
+        const int *value = (const int *)persimm_list_ref_from(&list, &cursor, i);
         if (NULL == value) {
             fprintf(stderr, "list cursor returned NULL\n");
             exit(1);
@@ -131,7 +131,7 @@ static void benchmark_vector(void) {
 
     start = clock();
     for (size_t i = 0; i < count; i++) {
-        int *value = (int *)persimm_vector_ref(&vector, i);
+        const int *value = (const int *)persimm_vector_ref(&vector, i);
         if (NULL == value) {
             fprintf(stderr, "vector ref returned NULL\n");
             exit(1);
@@ -186,7 +186,7 @@ static void benchmark_map(void) {
     start = clock();
     for (size_t i = 0; i < count; i++) {
         int key = (int)i;
-        int *value = (int *)persimm_map_ref(&map, &key);
+        const int *value = (const int *)persimm_map_ref(&map, &key);
         if (NULL == value) {
             fprintf(stderr, "map ref returned NULL\n");
             exit(1);

@@ -84,12 +84,12 @@ void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest) {
 
 /* Accessing */
 
-void *persimm_list_first(const persimm_list_t *list) {
+const void *persimm_list_first(const persimm_list_t *list) {
     if (NULL == list->head) return NULL;
     return persimm_list_cell_slot(list->head);
 }
 
-void *persimm_list_ref(const persimm_list_t *list, size_t index) {
+const void *persimm_list_ref(const persimm_list_t *list, size_t index) {
     if (index >= list->count) return NULL;
 
     persimm_list_cell_t *cell = list->head;
@@ -109,8 +109,8 @@ void persimm_list_cursor_reset(persimm_list_cursor_t *cursor) {
     cursor->cell = NULL;
 }
 
-void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
-                            size_t index) {
+const void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
+                                  size_t index) {
     if (index >= list->count) return NULL;
 
     persimm_list_cell_t *cell = list->head;
@@ -219,7 +219,7 @@ void persimm_list_foreach(const persimm_list_t *list, persimm_visit_fn fn, void 
     }
 }
 
-static void persimm_list_trace_visit(void *slot, size_t index, void *ctx) {
+static void persimm_list_trace_visit(const void *slot, size_t index, void *ctx) {
     (void) index;
     const persimm_list_t *list = (const persimm_list_t *)ctx;
     list->ops->trace(slot, list->ctx);

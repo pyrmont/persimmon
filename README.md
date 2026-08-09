@@ -63,9 +63,9 @@ lifecycle to a table of callbacks the host supplies:
 
 ```c
 typedef struct {
-    void (*retain)(void *slot, void *ctx);
-    void (*release)(void *slot, void *ctx);
-    void (*trace)(void *slot, void *ctx);
+    void (*retain)(const void *slot, void *ctx);
+    void (*release)(const void *slot, void *ctx);
+    void (*trace)(const void *slot, void *ctx);
 } persimm_elem_ops;
 ```
 

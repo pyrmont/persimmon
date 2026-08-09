@@ -202,7 +202,7 @@ persimm_status persimm_vector_transient_persist(persimm_vector_transient_t *tran
 
 /* Accessing */
 
-void *persimm_vector_ref(const persimm_vector_t *vector, size_t index) {
+const void *persimm_vector_ref(const persimm_vector_t *vector, size_t index) {
     if (index >= vector->count) return NULL;
 
     size_t tail_offset = vector->count - vector->tail_count;
@@ -430,7 +430,7 @@ void persimm_vector_foreach(const persimm_vector_t *vector, persimm_visit_fn fn,
     }
 }
 
-static void persimm_trace_visit(void *slot, size_t index, void *ctx) {
+static void persimm_trace_visit(const void *slot, size_t index, void *ctx) {
     (void) index;
     const persimm_vector_t *vector = (const persimm_vector_t *)ctx;
     vector->ops->trace(slot, vector->ctx);

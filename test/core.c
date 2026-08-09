@@ -234,7 +234,7 @@ static persimm_status test_set_advance_disj(persimm_set_t *set, const void *elem
 
 /* Traversing */
 
-static void collect_visit(void *slot, size_t index, void *ctx) {
+static void collect_visit(const void *slot, size_t index, void *ctx) {
     (void) index;
     entry_t **cursor = (entry_t **)ctx;
     **cursor = *(entry_t *)slot;
@@ -261,7 +261,7 @@ static void test_assoc_and_ref(const persimm_key_ops *ops, const char *label, in
     CHECK(map.count == (size_t)n, "%s: count is %zu, wanted %d", label, map.count, n);
 
     for (int i = 0; i < n; i++) {
-        int *value = (int *)persimm_map_ref(&map, &i);
+        const int *value = (const int *)persimm_map_ref(&map, &i);
         CHECK(NULL != value && *value == i * 3, "%s: ref %d", label, i);
     }
 
@@ -273,7 +273,8 @@ static void test_assoc_and_ref(const persimm_key_ops *ops, const char *label, in
         entry_t again = { 0, 999 };
         test_map_transient_assoc(&map, &again);
         CHECK(map.count == (size_t)n, "%s: replacing a value grew the count", label);
-        CHECK(999 == *(int *)persimm_map_ref(&map, &again.key), "%s: value not replaced", label);
+        CHECK(999 == *(const int *)persimm_map_ref(&map, &again.key),
+              "%s: value not replaced", label);
     }
 
     persimm_map_deinit(&map);
@@ -293,7 +294,7 @@ static void test_iteration_agrees(const persimm_key_ops *ops, const char *label,
     CHECK(count == (size_t)n, "%s: foreach saw %zu of %d", label, count, n);
 
     size_t steps = 0;
-    void *entry = persimm_map_next(&map, NULL);
+    const void *entry = persimm_map_next(&map, NULL);
     while (NULL != entry && steps < (size_t)n) {
         CHECK(((entry_t *)entry)->key == seen[steps].key, "%s: next parted from foreach at %zu",
               label, steps);
@@ -324,7 +325,7 @@ static void test_dissoc(const persimm_key_ops *ops, const char *label, int n) {
           map.count);
 
     for (int i = 0; i < n; i++) {
-        void *value = persimm_map_ref(&map, &i);
+        const void *value = persimm_map_ref(&map, &i);
         if (0 == i % 2) {
             CHECK(NULL == value, "%s: %d survived being dropped", label, i);
         } else {
@@ -429,8 +430,10 @@ static void test_sharing(const persimm_key_ops *ops, const char *label, int n) {
         test_map_advance_assoc(&replaced, &over);
         test_map_advance_dissoc(&dropped, &victim);
 
-        CHECK(victim == *(int *)persimm_map_ref(&base, &victim), "%s: the original changed", label);
-        CHECK(-1 == *(int *)persimm_map_ref(&replaced, &victim), "%s: the copy did not", label);
+        CHECK(victim == *(const int *)persimm_map_ref(&base, &victim),
+              "%s: the original changed", label);
+        CHECK(-1 == *(const int *)persimm_map_ref(&replaced, &victim),
+              "%s: the copy did not", label);
         CHECK(NULL == persimm_map_ref(&dropped, &victim), "%s: the copy kept a dropped key", label);
         CHECK(replaced.count == (size_t)n, "%s: replacing on a copy grew it", label);
         CHECK(dropped.count == (size_t)n - 1, "%s: dropping on a copy did not shrink it", label);
@@ -495,12 +498,12 @@ static void test_set(const persimm_key_ops *ops, const char *label, int n) {
 static int live[RC_SPACE];
 static int rc_underflows = 0;
 
-static void rc_retain(void *slot, void *ctx) {
+static void rc_retain(const void *slot, void *ctx) {
     (void) ctx;
     live[*(int *)slot]++;
 }
 
-static void rc_release(void *slot, void *ctx) {
+static void rc_release(const void *slot, void *ctx) {
     (void) ctx;
     if (--live[*(int *)slot] < 0) rc_underflows++;
 }
@@ -547,7 +550,7 @@ static void test_map_refcounts(const persimm_key_ops *ops, const char *label, in
 
     for (int i = 0; i < n; i++) {
         CHECK(live[i] >= 1, "%s: key %d was released while the original held it", label, i);
-        int *value = (int *)persimm_map_ref(&base, &i);
+        const int *value = (const int *)persimm_map_ref(&base, &i);
         CHECK(NULL != value && RC_VALUE_BASE + i == *value, "%s: the original lost %d", label, i);
     }
 
@@ -607,7 +610,7 @@ static void test_byte_defaults(void) {
     }
     CHECK(500 == map.count, "defaults: count is %zu", map.count);
     for (int i = 0; i < 500; i++) {
-        int *value = (int *)persimm_map_ref(&map, &i);
+        const int *value = (const int *)persimm_map_ref(&map, &i);
         CHECK(NULL != value && i * 2 == *value, "defaults: ref %d", i);
     }
 
@@ -655,8 +658,8 @@ static void test_persistent_operation_contracts(void) {
           "contract: vector push changed its source");
     CHECK(PERSIMM_OK == persimm_vector_update(&pushed, 0, &two, &updated),
           "contract: vector update failed");
-    int *pushed_value = (int *)persimm_vector_ref(&pushed, 0);
-    int *updated_value = (int *)persimm_vector_ref(&updated, 0);
+    const int *pushed_value = (const int *)persimm_vector_ref(&pushed, 0);
+    const int *updated_value = (const int *)persimm_vector_ref(&updated, 0);
     CHECK(NULL != pushed_value && 1 == *pushed_value,
           "contract: vector update changed its source");
     CHECK(NULL != updated_value && 2 == *updated_value,
@@ -817,14 +820,14 @@ static void test_cursor_survives_same_count_change(void) {
     test_list_advance_cons(&list, &tail);
     test_list_advance_cons(&list, &head);
 
-    int *seen = (int *)persimm_list_ref_from(&list, &cursor, 0);
+    const int *seen = (const int *)persimm_list_ref_from(&list, &cursor, 0);
     CHECK(NULL != seen && 2 == *seen, "cursor: initial head was wrong");
 
     test_list_advance_rest(&list);
     test_list_advance_cons(&list, &replacement);
-    seen = (int *)persimm_list_ref_from(&list, &cursor, 0);
+    seen = (const int *)persimm_list_ref_from(&list, &cursor, 0);
     CHECK(NULL != seen && 3 == *seen, "cursor: reused a stale cell after rest and cons");
-    seen = (int *)persimm_list_ref_from(&list, &cursor, 1);
+    seen = (const int *)persimm_list_ref_from(&list, &cursor, 1);
     CHECK(NULL != seen && 1 == *seen, "cursor: stale traversal lost the tail");
 
     persimm_list_deinit(&list);
@@ -838,7 +841,7 @@ static void test_replacement_may_alias_storage(void) {
     int value = 17;
     persimm_vector_init(&vector, sizeof(value), &rc_ops, NULL);
     test_vector_transient_push(&vector, &value);
-    void *stored = persimm_vector_ref(&vector, 0);
+    const void *stored = persimm_vector_ref(&vector, 0);
     CHECK(PERSIMM_OK == test_vector_transient_update(&vector, 0, stored),
           "alias: vector rejected its stored element");
     CHECK(1 == live[value] && 0 == rc_underflows,
@@ -902,13 +905,13 @@ static void test_vector_transient(void) {
           "transient vector: update failed");
     CHECK(PERSIMM_OK == persimm_vector_transient_push(&transient, &fresh),
           "transient vector: push failed");
-    CHECK(10 == *(int *)persimm_vector_ref(&base, 10) && 100 == base.count,
+    CHECK(10 == *(const int *)persimm_vector_ref(&base, 10) && 100 == base.count,
           "transient vector: original changed");
 
     persimm_vector_t result;
     CHECK(PERSIMM_OK == persimm_vector_transient_persist(&transient, &result),
           "transient vector: persist failed");
-    CHECK(101 == result.count && -1 == *(int *)persimm_vector_ref(&result, 10),
+    CHECK(101 == result.count && -1 == *(const int *)persimm_vector_ref(&result, 10),
           "transient vector: result is wrong");
     CHECK(PERSIMM_ERR_INVALID == persimm_vector_transient_push(&transient, &fresh),
           "transient vector: accepted an edit after persist");
