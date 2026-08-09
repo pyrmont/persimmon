@@ -82,6 +82,22 @@
   (is (= :length (get (persimmon/set :length) :length)))
   (is (= 1 (:length (persimmon/set :a)))))
 
+# A set answers with the element it holds, so calling one is a membership test
+# that reads as a predicate wherever a function is wanted.
+(deftest calling-a-set
+  (def s (persimmon/set :a :b))
+  (is (= :a (s :a)))
+  (is (= nil (s :c)))
+  (is (= nil (s nil)))
+  (is (= false (s :c false)))
+  (is (= :a (s :a false)))
+  (is (== @[:a :b] (filter s [:a :c :b]))))
+
+(deftest calling-a-set-with-the-wrong-number-of-arguments
+  (def s (persimmon/set :a))
+  (is (thrown? (s)))
+  (is (thrown? (s :a false :extra))))
+
 (deftest conj-with-a-new-element
   (def s1 (persimmon/set :a))
   (def s2 (persimmon/conj s1 :b))

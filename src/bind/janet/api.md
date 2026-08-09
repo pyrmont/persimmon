@@ -14,7 +14,7 @@
 
 Returns a new persistent vector or map with key associated with value. Vector keys are indices and may be negative. Associating nil in a map removes the key. coll is unchanged.
 
-[1]: wrapper.c#L1581
+[1]: wrapper.c#L1636
 
 
 ## assoc!
@@ -27,7 +27,7 @@ Returns a new persistent vector or map with key associated with value. Vector ke
 
 Associates key with value in a vector or map transient in place. Vector keys are indices and may be negative. Associating nil in a map removes the key. Returns trans.
 
-[2]: wrapper.c#L1738
+[2]: wrapper.c#L1793
 
 
 ## conj
@@ -40,7 +40,7 @@ Associates key with value in a vector or map transient in place. Vector keys are
 
 Returns a new persistent collection with x added: at the end of a vector, at the front of a list, or as an element of a set. coll is unchanged.
 
-[3]: wrapper.c#L1549
+[3]: wrapper.c#L1604
 
 
 ## conj!
@@ -53,7 +53,7 @@ Returns a new persistent collection with x added: at the end of a vector, at the
 
 Adds x to a vector or set transient in place. Returns trans.
 
-[4]: wrapper.c#L1715
+[4]: wrapper.c#L1770
 
 
 ## disj
@@ -66,7 +66,7 @@ Adds x to a vector or set transient in place. Returns trans.
 
 Returns a new persistent set without x. set is unchanged.
 
-[5]: wrapper.c#L1632
+[5]: wrapper.c#L1687
 
 
 ## disj!
@@ -79,7 +79,7 @@ Returns a new persistent set without x. set is unchanged.
 
 Removes x from a set transient in place. Returns trans.
 
-[6]: wrapper.c#L1778
+[6]: wrapper.c#L1833
 
 
 ## dissoc
@@ -92,7 +92,7 @@ Removes x from a set transient in place. Returns trans.
 
 Returns a new persistent map without key. map is unchanged.
 
-[7]: wrapper.c#L1618
+[7]: wrapper.c#L1673
 
 
 ## dissoc!
@@ -105,7 +105,7 @@ Returns a new persistent map without key. map is unchanged.
 
 Removes key from a map transient in place. Returns trans.
 
-[8]: wrapper.c#L1767
+[8]: wrapper.c#L1822
 
 
 ## first
@@ -118,7 +118,7 @@ Removes key from a map transient in place. Returns trans.
 
 Returns the first element of a persistent list, or nil if the list is empty.
 
-[9]: wrapper.c#L1828
+[9]: wrapper.c#L1883
 
 
 ## has-key?
@@ -131,7 +131,7 @@ Returns the first element of a persistent list, or nil if the list is empty.
 
 Returns true if the persistent map or set coll contains key, or false otherwise. A nil key always returns false.
 
-[10]: wrapper.c#L1794
+[10]: wrapper.c#L1849
 
 
 ## into
@@ -144,7 +144,7 @@ Returns true if the persistent map or set coll contains key, or false otherwise.
 
 Returns a new persistent collection of target's kind holding target's elements and those of coll. A map takes coll's entries, or its elements when each is a key-value pair. Elements go at the end of a vector and in front of a list. target is unchanged.
 
-[11]: wrapper.c#L1511
+[11]: wrapper.c#L1566
 
 
 ## list
@@ -157,7 +157,7 @@ Returns a new persistent collection of target's kind holding target's elements a
 
 Creates a persistent list whose elements are xs, in order. Splice a collection to convert one. Returns the list.
 
-[12]: wrapper.c#L1479
+[12]: wrapper.c#L1534
 
 
 ## map
@@ -170,7 +170,7 @@ Creates a persistent list whose elements are xs, in order. Splice a collection t
 
 Creates a persistent map from alternating keys and values. A key whose value is nil adds no entry. Use into to convert a dictionary. Returns the map.
 
-[13]: wrapper.c#L1487
+[13]: wrapper.c#L1542
 
 
 ## persistent!
@@ -183,7 +183,7 @@ Creates a persistent map from alternating keys and values. A key whose value is 
 
 Consumes a vector, map or set transient and returns its persistent collection. Using trans afterwards is an error.
 
-[14]: wrapper.c#L1683
+[14]: wrapper.c#L1738
 
 
 ## rest
@@ -196,7 +196,7 @@ Consumes a vector, map or set transient and returns its persistent collection. U
 
 Returns a persistent list without its first element. The rest of an empty list is an empty list. list is unchanged.
 
-[15]: wrapper.c#L1847
+[15]: wrapper.c#L1902
 
 
 ## set
@@ -209,7 +209,7 @@ Returns a persistent list without its first element. The rest of an empty list i
 
 Creates a persistent set whose elements are xs. Nil cannot be an element. Splice a collection to convert one. Returns the set.
 
-[16]: wrapper.c#L1496
+[16]: wrapper.c#L1551
 
 
 ## to-array
@@ -222,7 +222,7 @@ Creates a persistent set whose elements are xs. Nil cannot be an element. Splice
 
 Copies a persistent collection into a mutable Janet array. Map entries become key-value tuples. Returns the array.
 
-[17]: wrapper.c#L1867
+[17]: wrapper.c#L1922
 
 
 ## to-table
@@ -235,7 +235,7 @@ Copies a persistent collection into a mutable Janet array. Map entries become ke
 
 Copies the entries of a persistent map into a mutable Janet table. Returns the table.
 
-[18]: wrapper.c#L1815
+[18]: wrapper.c#L1870
 
 
 ## transient
@@ -248,7 +248,7 @@ Copies the entries of a persistent map into a mutable Janet table. Returns the t
 
 Creates a mutable, uniquely owned transient from a persistent vector, map or set. coll is unchanged. Returns the transient.
 
-[19]: wrapper.c#L1647
+[19]: wrapper.c#L1702
 
 
 ## vec
@@ -261,5 +261,5 @@ Creates a mutable, uniquely owned transient from a persistent vector, map or set
 
 Creates a persistent vector whose elements are xs, in order. Splice a collection or use into to convert one. Returns the vector.
 
-[20]: wrapper.c#L1472
+[20]: wrapper.c#L1527
 

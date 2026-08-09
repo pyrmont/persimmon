@@ -84,8 +84,8 @@ it persistent consumes it, and any later attempt to use it is an error:
 ```
 
 The `!` operations return the transient they receive. Transients support
-`length`, `get` and iteration while active, but cannot be compared, hashed or
-marshalled. Lists have no transient form: consing already costs one new cell
+`length`, `get`, being called and iteration while active, but cannot be
+compared, hashed or marshalled. Lists have no transient form: consing already costs one new cell
 and never copies the chain it shares.
 
 Every structure supports `length`, `get`, `next` and so the whole of Janet's
@@ -97,6 +97,23 @@ key and answers with its value, and a set takes an element and answers with
 the element, as in Clojure. Because a map may hold the very keywords its
 method table answers to, a key it holds is found before any method of the
 same name.
+
+Every structure can also stand in the operator position, where calling it looks
+something up in itself:
+
+```janet
+(v1 0)                       # -> :foo
+(m1 :foo)                    # -> 1
+(s1 :foo)                    # -> :foo
+(filter s1 [:foo :qux])      # -> @[:foo]
+(map m1 [:foo :bar])         # -> @[1 2]
+```
+
+A miss answers with the second argument, or with nil where there is none, which
+is what `get` does. Janet's own indexed types raise instead when called outside
+their range; a set that raised at the first element it did not hold could not
+be a predicate at all. Where a miss should be an error, `(in coll key)` remains
+the strict form.
 
 Iterating a map or a set goes through the same `next` every Janet dictionary
 uses, so `keys`, `values`, `pairs` and `each` all work as they do on a table.

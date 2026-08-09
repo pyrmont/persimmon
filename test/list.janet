@@ -114,6 +114,19 @@
   (is (= nil (get lst 2)))
   (is (= nil (get lst 2147483647))))
 
+(deftest calling-a-list
+  (def lst (persimmon/list :foo :bar))
+  (is (= :foo (lst 0)))
+  (is (= :bar (lst -1)))
+  (is (= nil (lst 2)))
+  (is (= :fallback (lst 2 :fallback)))
+  (is (== @[:foo :bar] (map lst [0 1]))))
+
+(deftest calling-a-list-with-the-wrong-number-of-arguments
+  (def lst (persimmon/list :foo))
+  (is (thrown? (lst)))
+  (is (thrown? (lst 0 :fallback :extra))))
+
 (deftest next-with-empty-list
   (is (= nil (next (persimmon/list)))))
 

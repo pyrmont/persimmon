@@ -52,6 +52,22 @@
   (is (== @[:b :c] (sorted (persimmon/to-array result))))
   (is (thrown? (persimmon/disj! trans :b))))
 
+# A transient answers in the operator position as it does to get, and a spent
+# one raises there as it does everywhere else.
+(deftest calling-a-transient
+  (def vector-trans (persimmon/transient (persimmon/vec :foo)))
+  (is (= :foo (vector-trans 0)))
+  (is (= nil (vector-trans 1)))
+  (is (= :fallback (vector-trans 1 :fallback)))
+  (def map-trans (persimmon/transient (persimmon/map :a 1)))
+  (is (= 1 (map-trans :a)))
+  (is (= :fallback (map-trans :b :fallback)))
+  (def set-trans (persimmon/transient (persimmon/set :a)))
+  (is (= :a (set-trans :a)))
+  (is (= false (set-trans :b false)))
+  (persimmon/persistent! vector-trans)
+  (is (thrown? (vector-trans 0))))
+
 (deftest only-editable-collections-become-transient
   (is (thrown? (persimmon/transient (persimmon/list 1 2)))))
 

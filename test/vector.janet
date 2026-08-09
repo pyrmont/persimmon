@@ -99,6 +99,22 @@
   (is (= nil (get vec 2)))
   (is (= nil (get vec 2147483647))))
 
+# A structure in the operator position answers as get does, rather than as
+# Janet's own indexed types do when called, which is to raise.
+(deftest calling-a-vector
+  (def vec (persimmon/vec :foo :bar))
+  (is (= :foo (vec 0)))
+  (is (= :bar (vec -1)))
+  (is (= nil (vec 2)))
+  (is (= :fallback (vec 2 :fallback)))
+  (is (= :foo (vec 0 :fallback)))
+  (is (== @[:foo :bar] (map vec [0 1]))))
+
+(deftest calling-a-vector-with-the-wrong-number-of-arguments
+  (def vec (persimmon/vec :foo))
+  (is (thrown? (vec)))
+  (is (thrown? (vec 0 :fallback :extra))))
+
 (deftest conj-with-vector-with-space-in-tail
   (def vec1 (persimmon/vec :foo :bar))
   (def vec2 (persimmon/conj vec1 :qux))
