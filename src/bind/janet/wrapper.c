@@ -1209,7 +1209,10 @@ static void janet_persimm_view(Janet coll, JanetView *view) {
 
 /* C Functions */
 
-static Janet cfun_persimm_vec(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_vec,
+         "(vec &opt coll)",
+         "Creates a persistent vector, optionally populated from the indexed "
+         "collection coll. Returns the vector.") {
     janet_arity(argc, 0, 1);
 
     persimm_vector_t *vector = janet_persimm_new_vector();
@@ -1236,7 +1239,10 @@ static Janet cfun_persimm_vec(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(vector);
 }
 
-static Janet cfun_persimm_list(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_list,
+         "(list &opt coll)",
+         "Creates a persistent list, optionally populated from the indexed "
+         "collection coll in the same order. Returns the list.") {
     janet_arity(argc, 0, 1);
 
     janet_persimm_list_t *wrapper = janet_persimm_new_list();
@@ -1254,7 +1260,10 @@ static Janet cfun_persimm_list(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(wrapper);
 }
 
-static Janet cfun_persimm_map(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_map,
+         "(map &opt dict)",
+         "Creates a persistent map, optionally populated from the dictionary "
+         "dict. Entries whose value is nil are omitted. Returns the map.") {
     janet_arity(argc, 0, 1);
 
     persimm_map_t *map = janet_persimm_new_map();
@@ -1286,7 +1295,10 @@ static Janet cfun_persimm_map(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(map);
 }
 
-static Janet cfun_persimm_set(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_set,
+         "(set &opt coll)",
+         "Creates a persistent set, optionally populated from the indexed "
+         "collection coll. Nil cannot be an element. Returns the set.") {
     janet_arity(argc, 0, 1);
 
     persimm_set_t *set = janet_persimm_new_set();
@@ -1318,7 +1330,11 @@ static Janet cfun_persimm_set(int32_t argc, Janet *argv) {
  * As in Clojure, conj adds an element wherever the structure can take one
  * cheapest: the end of a vector, the front of a list, anywhere in a set.
  */
-static Janet cfun_persimm_conj(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_conj,
+         "(conj coll x)",
+         "Returns a new persistent collection with x added: at the end of a "
+         "vector, at the front of a list, or as an element of a set. coll is "
+         "unchanged.") {
     janet_fixarity(argc, 2);
 
     if (janet_checkabstract(argv[0], &persimm_set_type)) {
@@ -1346,7 +1362,11 @@ static Janet cfun_persimm_conj(int32_t argc, Janet *argv) {
     janet_panicf("expected a persimmon vector, list or set, got %v", argv[0]);
 }
 
-static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_assoc,
+         "(assoc coll key value)",
+         "Returns a new persistent vector or map with key associated with "
+         "value. Vector keys are indices and may be negative. Associating nil "
+         "in a map removes the key. coll is unchanged.") {
     janet_fixarity(argc, 3);
 
     if (janet_checkabstract(argv[0], &persimm_map_type)) {
@@ -1381,7 +1401,9 @@ static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(new_vector);
 }
 
-static Janet cfun_persimm_dissoc(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_dissoc,
+         "(dissoc map key)",
+         "Returns a new persistent map without key. map is unchanged.") {
     janet_fixarity(argc, 2);
 
     persimm_map_t *old_map = (persimm_map_t *)janet_getabstract(argv, 0, &persimm_map_type);
@@ -1393,7 +1415,9 @@ static Janet cfun_persimm_dissoc(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(new_map);
 }
 
-static Janet cfun_persimm_disj(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_disj,
+         "(disj set x)",
+         "Returns a new persistent set without x. set is unchanged.") {
     janet_fixarity(argc, 2);
 
     persimm_set_t *old_set = (persimm_set_t *)janet_getabstract(argv, 0, &persimm_set_type);
@@ -1405,7 +1429,10 @@ static Janet cfun_persimm_disj(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(new_set);
 }
 
-static Janet cfun_persimm_transient(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_transient,
+         "(transient coll)",
+         "Creates a mutable, uniquely owned transient from a persistent vector, "
+         "map or set. coll is unchanged. Returns the transient.") {
     janet_fixarity(argc, 1);
 
     if (janet_checkabstract(argv[0], &persimm_vector_type)) {
@@ -1438,7 +1465,10 @@ static Janet cfun_persimm_transient(int32_t argc, Janet *argv) {
     janet_panicf("expected a persimmon vector, map or set, got %v", argv[0]);
 }
 
-static Janet cfun_persimm_persistent(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_persistent,
+         "(persistent! trans)",
+         "Consumes a vector, map or set transient and returns its persistent "
+         "collection. Using trans afterwards is an error.") {
     janet_fixarity(argc, 1);
 
     if (janet_checkabstract(argv[0], &persimm_vector_transient_type)) {
@@ -1468,7 +1498,9 @@ static Janet cfun_persimm_persistent(int32_t argc, Janet *argv) {
     janet_panicf("expected a persimmon transient, got %v", argv[0]);
 }
 
-static Janet cfun_persimm_conj_mut(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_conj_mut,
+         "(conj! trans x)",
+         "Adds x to a vector or set transient in place. Returns trans.") {
     janet_fixarity(argc, 2);
 
     if (janet_checkabstract(argv[0], &persimm_vector_transient_type)) {
@@ -1487,7 +1519,11 @@ static Janet cfun_persimm_conj_mut(int32_t argc, Janet *argv) {
     janet_panicf("expected a persimmon vector or set transient, got %v", argv[0]);
 }
 
-static Janet cfun_persimm_assoc_mut(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_assoc_mut,
+         "(assoc! trans key value)",
+         "Associates key with value in a vector or map transient in place. "
+         "Vector keys are indices and may be negative. Associating nil in a "
+         "map removes the key. Returns trans.") {
     janet_fixarity(argc, 3);
 
     if (janet_checkabstract(argv[0], &persimm_map_transient_type)) {
@@ -1514,7 +1550,9 @@ static Janet cfun_persimm_assoc_mut(int32_t argc, Janet *argv) {
     return argv[0];
 }
 
-static Janet cfun_persimm_dissoc_mut(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_dissoc_mut,
+         "(dissoc! trans key)",
+         "Removes key from a map transient in place. Returns trans.") {
     janet_fixarity(argc, 2);
     janet_persimm_check_key(argv[1]);
     persimm_map_transient_t *transient =
@@ -1523,7 +1561,9 @@ static Janet cfun_persimm_dissoc_mut(int32_t argc, Janet *argv) {
     return argv[0];
 }
 
-static Janet cfun_persimm_disj_mut(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_disj_mut,
+         "(disj! trans x)",
+         "Removes x from a set transient in place. Returns trans.") {
     janet_fixarity(argc, 2);
     janet_persimm_check_key(argv[1]);
     persimm_set_transient_t *transient =
@@ -1536,7 +1576,10 @@ static Janet cfun_persimm_disj_mut(int32_t argc, Janet *argv) {
  * A set's elements are its keys, so this answers for both structures. Nothing
  * holds nil as a key, so asking after it is false rather than an error.
  */
-static Janet cfun_persimm_has_key(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_has_key,
+         "(has-key? coll key)",
+         "Returns true if the persistent map or set coll contains key, or false "
+         "otherwise. A nil key always returns false.") {
     janet_fixarity(argc, 2);
 
     if (janet_checktype(argv[1], JANET_NIL)) return janet_wrap_false();
@@ -1554,7 +1597,10 @@ static Janet cfun_persimm_has_key(int32_t argc, Janet *argv) {
     janet_panicf("expected a persimmon map or set, got %v", argv[0]);
 }
 
-static Janet cfun_persimm_to_table(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_to_table,
+         "(to-table map)",
+         "Copies the entries of a persistent map into a mutable Janet table. "
+         "Returns the table.") {
     janet_fixarity(argc, 1);
 
     persimm_map_t *map = (persimm_map_t *)janet_getabstract(argv, 0, &persimm_map_type);
@@ -1564,7 +1610,10 @@ static Janet cfun_persimm_to_table(int32_t argc, Janet *argv) {
     return janet_wrap_table(table);
 }
 
-static Janet cfun_persimm_first(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_first,
+         "(first list)",
+         "Returns the first element of a persistent list, or nil if the list is "
+         "empty.") {
     janet_fixarity(argc, 1);
 
     janet_persimm_list_t *wrapper =
@@ -1580,7 +1629,10 @@ static Janet cfun_persimm_first(int32_t argc, Janet *argv) {
  * The rest of an empty list is an empty list, as in Clojure, rather than an
  * error.
  */
-static Janet cfun_persimm_rest(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_rest,
+         "(rest list)",
+         "Returns a persistent list without its first element. The rest of an "
+         "empty list is an empty list. list is unchanged.") {
     janet_fixarity(argc, 1);
 
     janet_persimm_list_t *old_list =
@@ -1597,7 +1649,10 @@ static Janet cfun_persimm_rest(int32_t argc, Janet *argv) {
     return janet_wrap_abstract(new_list);
 }
 
-static Janet cfun_persimm_to_array(int32_t argc, Janet *argv) {
+JANET_FN(cfun_persimm_to_array,
+         "(to-array coll)",
+         "Copies a persistent collection into a mutable Janet array. Map "
+         "entries become key-value tuples. Returns the array.") {
     janet_fixarity(argc, 1);
 
     if (janet_checkabstract(argv[0], &persimm_vector_type)) {
@@ -1632,27 +1687,27 @@ static Janet cfun_persimm_to_array(int32_t argc, Janet *argv) {
     janet_panicf("expected a persimmon collection, got %v", argv[0]);
 }
 
-static const JanetReg cfuns[] = {
-    {"vec", cfun_persimm_vec, NULL},
-    {"list", cfun_persimm_list, NULL},
-    {"map", cfun_persimm_map, NULL},
-    {"set", cfun_persimm_set, NULL},
-    {"assoc", cfun_persimm_assoc, NULL},
-    {"dissoc", cfun_persimm_dissoc, NULL},
-    {"conj", cfun_persimm_conj, NULL},
-    {"disj", cfun_persimm_disj, NULL},
-    {"transient", cfun_persimm_transient, NULL},
-    {"persistent!", cfun_persimm_persistent, NULL},
-    {"conj!", cfun_persimm_conj_mut, NULL},
-    {"assoc!", cfun_persimm_assoc_mut, NULL},
-    {"dissoc!", cfun_persimm_dissoc_mut, NULL},
-    {"disj!", cfun_persimm_disj_mut, NULL},
-    {"has-key?", cfun_persimm_has_key, NULL},
-    {"first", cfun_persimm_first, NULL},
-    {"rest", cfun_persimm_rest, NULL},
-    {"to-array", cfun_persimm_to_array, NULL},
-    {"to-table", cfun_persimm_to_table, NULL},
-    {NULL, NULL, NULL}
+static const JanetRegExt cfuns[] = {
+    JANET_REG("vec", cfun_persimm_vec),
+    JANET_REG("list", cfun_persimm_list),
+    JANET_REG("map", cfun_persimm_map),
+    JANET_REG("set", cfun_persimm_set),
+    JANET_REG("assoc", cfun_persimm_assoc),
+    JANET_REG("dissoc", cfun_persimm_dissoc),
+    JANET_REG("conj", cfun_persimm_conj),
+    JANET_REG("disj", cfun_persimm_disj),
+    JANET_REG("transient", cfun_persimm_transient),
+    JANET_REG("persistent!", cfun_persimm_persistent),
+    JANET_REG("conj!", cfun_persimm_conj_mut),
+    JANET_REG("assoc!", cfun_persimm_assoc_mut),
+    JANET_REG("dissoc!", cfun_persimm_dissoc_mut),
+    JANET_REG("disj!", cfun_persimm_disj_mut),
+    JANET_REG("has-key?", cfun_persimm_has_key),
+    JANET_REG("first", cfun_persimm_first),
+    JANET_REG("rest", cfun_persimm_rest),
+    JANET_REG("to-array", cfun_persimm_to_array),
+    JANET_REG("to-table", cfun_persimm_to_table),
+    JANET_REG_END
 };
 
 /* Environment Registration */
@@ -1669,7 +1724,7 @@ void persimm_register_type(JanetTable *env) {
 }
 
 void persimm_register_functions(JanetTable *env) {
-    janet_cfuns(env, "persimmon", cfuns);
+    janet_cfuns_ext(env, "persimmon", cfuns);
 }
 
 JANET_MODULE_ENTRY(JanetTable *env) {

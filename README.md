@@ -5,37 +5,65 @@
 [icon]: https://github.com/pyrmont/persimmon/workflows/test/badge.svg
 [status]: https://github.com/pyrmont/persimmon/actions?query=workflow%3Atest
 
-Persimmon is a C library of persistent immutable data structures, together
-with a binding for the [Janet][] programming language.
+Persimmon is a C library providing four persistent immutable data
+structures: a vector, a list, a map and a set.
+
+Persimmon is designed to be simple to use directly in C or via bindings from
+another language. An example binding for the [Janet][] programming language is
+included in the project.
 
 [Janet]: https://janet-lang.org
 
+## Terminology
+
+In Persimmon:
+
+- A **persistent** collection preserves its earlier versions. It does not mean
+  that the value is written to disk. An operation that would normally change
+  its input collection returns a new collection instead, leaving the input
+  available for further use.
+
+- An **immutable** collection does not change its contents. This makes it safe
+  for several versions to coexist without one update changing another.
+
+- A collection uses **structural sharing** to avoid making complete copies. The
+  input collection and the resulting collection reuse the internal nodes they
+  have in common. Internal reference counts keep shared nodes alive until the
+  last collection using them is deinitialised.
+
+- A **transient** collection is a temporary, uniquely owned mutable view used
+  to apply a batch of vector, map or set updates efficiently. It may begin
+  empty or share a persistent source; shared paths are copied when first
+  changed and can then be reused by later edits. Converting the transient back
+  to a persistent collection consumes it. Lists have no transient form because
+  prepending and taking the rest already take constant time without copying the
+  shared tail.
+
 ## Implementation
 
-A persistent data structure is never modified. An operation that would change
-it returns a new structure instead, and the two share as much of their
-internal representation as they can.
+Persimmon implements its four persistent immutable collections as follows:
 
-| Structure | Representation                        | Cheap operations      |
+| Structure | Representation                        | Cheap Operations      |
 | --------- | ------------------------------------- | --------------------- |
 | Vector    | 32-way bit-partitioned trie with tail | index, append         |
 | List      | Singly linked chain of cells          | first, rest, prepend  |
 | Map       | 32-way CHAMP hash array mapped trie   | lookup, store, remove |
 | Set       | The same trie over keys alone         | lookup, add, remove   |
 
-The vector is a trie of the kind Clojure popularised: 32 items to a node, with
-a tail buffer so that repeated appends usually touch nothing but the last node.
+The **vector** is a trie of the kind Clojure popularised: 32 items to a node,
+with a tail buffer so that repeated appends usually touch nothing but the last
+node.
 
-The list is a cons list, so two lists share every cell from their first common
-element onwards and prepending costs one cell however long the list is.
+The **list** is a cons list, so two lists share every cell from their first
+common element onwards and prepending costs one cell however long the list is.
 Indexing a list is linear. Iterating one is not: a host can keep a cursor that
 lets a read resume from where the last one stopped, so walking a list front to
 back costs one step per element. An index behind the cursor, into a different
 list, or into a list changed since the cursor was used simply starts again from
 the head.
 
-The map is a compressed hash-array mapped prefix-tree (i.e. CHAMP) trie. Five
-bits of a key's hash choose a slot at each level, and a node carries two
+The **map** is a compressed hash-array mapped prefix-tree (i.e. CHAMP) trie.
+Five bits of a key's hash choose a slot at each level, and a node carries two
 bitmaps: one for the slots holding an entry and one for the slots holding a
 child. The second bitmap also keeps a trie in canonical form, so two maps
 holding the same keys have the same shape however they were built. They
@@ -44,60 +72,74 @@ adding and removing entries is indistinguishable from one handed them outright.
 Keys whose hashes agree in all 32 bits are the exception: they share a
 collision node and sit in the order they arrived.
 
-A set is the same trie over entries that are keys and nothing else, so the
+The **set** is the same trie over entries that are keys and nothing else, so the
 two share their whole implementation.
 
-## Structure
+### Structure
 
-The compiled source is in two layers, and the directories say which is which.
+The source code is separated into three components:
 
 ```
 inc/                    the public C header
-src/                    the core, which knows no host language
+src/                    the core C source
 src/bind/janet/         the Janet binding
 ```
 
-The files directly under `src` make up the core. Its elements are opaque blobs
-of a fixed size, stored inline in the structure, and it delegates their
-lifecycle to callback tables the host supplies. Vectors and lists use
-`persimm_elem_ops` for their elements; maps use it for their values:
+### Lifecycle
+
+The elements stored in all the collections are treated as opaque blobs of a
+fixed size and stored inline in internal nodes and cells. A library consumer
+may provide lifecycle functions for managed elements:
 
 ```c
+/* used by vectors, lists and maps */
 typedef struct {
     void (*retain)(const void *slot, void *ctx);
     void (*release)(const void *slot, void *ctx);
     void (*trace)(const void *slot, void *ctx);
 } persimm_elem_ops;
+
+/* used by maps and sets */
+typedef struct {
+    uint32_t (*hash)(const void *key, size_t key_size, void *ctx);
+    bool (*equals)(const void *key_a, const void *key_b, size_t key_size,
+                   void *ctx);
+    void (*retain)(const void *slot, void *ctx);
+    void (*release)(const void *slot, void *ctx);
+    void (*trace)(const void *slot, void *ctx);
+} persimm_key_ops;
 ```
 
-A host that reference counts fills in `retain` and `release`; a host with a
-tracing collector fills in `trace`; a host storing plain data passes NULL and
-pays for none of it. Map and set keys use `persimm_key_ops`, which adds the same
-lifecycle callbacks to their hash and equality operations. Maps accept separate
-contexts for their keys and values, so the two need not share a representation
-or ownership scheme.
+A few notes:
 
-Operation tables and their contexts are borrowed. They must outlive the
-collection and every clone or transient derived from it; static `const` tables
-are the usual choice.
+- A host that reference counts fills in `retain` and `release`. A host with a
+  tracing collector fills in `trace`. A host storing plain data can leave those
+  callbacks NULL.
 
-`src/bind` holds host-language bindings. Its `janet` directory contains the
-reference implementation of that interface. It stores `Janet` values inline,
-leaves `retain` and `release` NULL, and traces through `janet_mark`. A binding
-for another language would sit beside it without changing the core.
+- Vectors and lists use `persimm_elem_ops` for their elements while maps use it
+  for their values.
 
-Node and cell reference counts are atomic wherever the toolchain provides
-atomics, whether through C11 `<stdatomic.h>`, the GCC and Clang builtins, or
-the Windows interlocked functions. `persimm_has_atomic_refcounts` reports
-whether that was the case for a given build. Where it returns false, a graph
-of structures must not be shared across threads.
+- Maps and sets use `persimm_key_ops` for their keys. If `hash` or `equals` is
+  NULL, Persimmon uses FNV-1a over the key bytes or `memcmp`, respectively.
+  Those defaults suit plain keys without padding or multiple byte
+  representations of the same value; other key types must supply both
+  operations. Maps accept separate contexts for their keys and values, so the
+  two need not share a representation or ownership scheme.
+
+- Operation tables and their contexts are borrowed. They must outlive the
+  collection and every clone or transient derived from it. `static const`
+  tables are the recommended choice.
+
+- Node and cell reference counts are atomic wherever the toolchain provides
+  atomics, whether through C11 `<stdatomic.h>`, the GCC and Clang builtins, or
+  the Windows interlocked functions. `persimm_has_atomic_refcounts` reports
+  whether that was the case for a given build. Where it returns false, a graph
+  of structures must not be shared across threads.
 
 ## Installation
 
-### C
-
 The public C interface is [inc/persimmon.h](inc/persimmon.h). Building the
-core needs a C99 compiler, `make` and `ar`, but no Janet installation:
+core needs a C99 compiler, `make` and `ar`:
 
 ```console
 $ make
@@ -115,160 +157,28 @@ all be overridden for packaging:
 $ make install DESTDIR=/tmp/package-root PREFIX=/usr
 ```
 
-Persistent update functions take separate source and destination structures.
-The destination must be uninitialised and distinct from the source. The source
-is unchanged; on success, both structures own references and must eventually
-be deinitialised. A failed operation also leaves its destination safe to
-deinitialise.
+The update functions for persistent collections take separate source and
+destination structures. The destination must be uninitialised and distinct from
+the source. The source is unchanged; on success, both structures own references
+and must eventually be deinitialised. A failed operation also leaves its
+destination safe to deinitialise.
 
-For several vector, map or set updates, use a transient. A transient can start
-empty or share a persistent source, and is consumed when persisted. Lists need
-no transient because prepending and taking the rest already cost constant time.
+Transient collections can be used for improved performance when repeatedly
+updating a vector, map or set. A transient can start empty or share a
+persistent source, and is consumed when persisted. Lists need no transient
+because prepending and taking the rest already cost constant time.
 
 The complete example in [res/examples/core.c](res/examples/core.c) builds with:
 
 ```console
 $ make example
-$ _build/core/persimmon-example
+$ ./_build/core/persimmon-example
 empty: 0, first: 1
 first: 1, result: 1 2 3 4 5
 ```
 
-The core stores opaque, fixed-size values inline. Applications storing managed
-objects supply lifecycle callbacks; maps additionally describe their entry
-layout and key operations. The public header documents these host integration
-contracts in full.
-
-The repository also includes a Janet wrapper as an example of how Persimmon
-can be integrated into another language.
-
-### Janet
-
-Add the dependency to your `info.jdn` file:
-
-```janet
-  :dependencies ["https://github.com/pyrmont/persimmon"]
-```
-
-## Usage
-
-```janet
-(import persimmon)
-
-(def v1 (persimmon/vec [:foo :bar]))
-(def v2 (persimmon/conj v1 :qux))
-(def v3 (persimmon/assoc v2 0 :quux))
-
-(length v1)         # -> 2
-(get v2 2)          # -> :qux
-(persimmon/to-array v3)
-                    # -> @[:quux :bar :qux]
-
-(def l1 (persimmon/list [:bar :qux]))
-(def l2 (persimmon/conj l1 :foo))
-
-(persimmon/first l2)
-                    # -> :foo
-(persimmon/to-array (persimmon/rest l2))
-                    # -> @[:bar :qux]
-
-(def m1 (persimmon/map {:foo 1 :bar 2}))
-(def m2 (persimmon/assoc m1 :qux 3))
-(def m3 (persimmon/dissoc m2 :foo))
-
-(get m2 :qux)       # -> 3
-(persimmon/to-table m3)
-                    # -> @{:bar 2 :qux 3}
-
-(def s1 (persimmon/set [:foo :bar]))
-(def s2 (persimmon/conj s1 :qux))
-
-(get s2 :qux)       # -> :qux
-(persimmon/has-key? s2 :foo)
-                    # -> true
-```
-
-As in Clojure, `conj` adds an element wherever the structure takes one most
-cheaply — the end of a vector, the front of a list, anywhere in a set.
-
-Vectors, maps and sets can also be changed in a transient when several edits
-belong to one operation. The transient is mutable and uniquely owned; turning
-it persistent consumes it, and any later attempt to use it is an error:
-
-```janet
-(def t (persimmon/transient (persimmon/vec)))
-(for i 0 1000
-  (persimmon/conj! t i))
-(def settled (persimmon/persistent! t))
-```
-
-The `!` operations return the transient they receive. Transients support
-`length`, `get` and iteration while active, but cannot be compared, hashed or
-marshalled. Lists have no transient form: consing already costs one new cell
-and never copies the chain it shares.
-
-| Function                       | Result                                       |
-| ------------------------------ | -------------------------------------------- |
-| `(persimmon/vec &opt coll)`    | a vector, optionally seeded from an indexed  |
-| `(persimmon/list &opt coll)`   | a list, optionally seeded from an indexed    |
-| `(persimmon/map &opt coll)`    | a map, optionally seeded from a dictionary   |
-| `(persimmon/set &opt coll)`    | a set, optionally seeded from an indexed     |
-| `(persimmon/conj coll x)`      | a vector, list or set with `x` added         |
-| `(persimmon/assoc coll k x)`   | a vector or map with `k` replaced by `x`     |
-| `(persimmon/dissoc map k)`     | a map without the key `k`                    |
-| `(persimmon/disj set x)`       | a set without the element `x`                |
-| `(persimmon/transient coll)`   | a mutable view of a vector, map or set       |
-| `(persimmon/persistent! trans)`| consume a transient and return its collection|
-| `(persimmon/conj! trans x)`    | append to a vector or add to a set transient |
-| `(persimmon/assoc! trans k x)` | update a vector or map transient             |
-| `(persimmon/dissoc! trans k)`  | remove a key from a map transient            |
-| `(persimmon/disj! trans x)`    | remove an element from a set transient       |
-| `(persimmon/has-key? coll k)`  | whether a map or set holds `k`               |
-| `(persimmon/first lst)`        | the head of a list, or nil if it is empty    |
-| `(persimmon/rest lst)`         | a list without its head                      |
-| `(persimmon/to-array coll)`    | the elements as a mutable array              |
-| `(persimmon/to-table map)`     | the entries as a mutable table               |
-
-Every structure supports `length`, `get`, `next` and so the whole of Janet's
-iteration machinery, `string`, and `hash`. A vector prints as `[foo bar]`, a
-list as `(foo bar)`, a map as `{foo 1}` and a set as `#{foo bar}`.
-
-A vector and a list take an index, including a negative one. A map takes a
-key and answers with its value, and a set takes an element and answers with
-the element, as in Clojure. Because a map may hold the very keywords its
-method table answers to, a key it holds is found before any method of the
-same name.
-
-Iterating a map or a set goes through the same `next` every Janet dictionary
-uses, so `keys`, `values`, `pairs` and `each` all work as they do on a table.
-Nothing is kept between steps, so one map may be walked from several places
-at once.
-
-A nil value means no entry, as it does for a Janet table, so
-`(persimmon/assoc m :k nil)` removes the key rather than storing nothing
-under it. Nil cannot be a key: it is how Janet's iteration protocol says
-"start at the beginning", so a map or set refuses it.
-
-Two structures of the same kind are equal when they hold the same things, so
-`=`, `deep=` and use as a key in a table all work as they do for Janet's own
-collections. Two structures of different kinds are never equal, whatever they
-hold.
-
-A vector and a list compare element by element, which also orders them, so
-sorting either is meaningful. A map and a set carry no order of their own:
-they are equal when they hold the same entries, and the order between two
-that differ is arbitrary and not to be relied on. Equal structures always
-hash alike, so a map may be a key in a table or an element of another set.
-
-Every structure can be marshalled, and so written to a file or sent to
-another thread. What is written is the contents rather than the shape, and
-what comes back is built from those, which is enough to give back what went
-in: a map read back holds its entries in the order the original held them,
-and hashes the same. Reading one back needs the module to have been loaded,
-since that is what registers the type its name refers to.
-
-Marshalling copies. Two threads that exchange a structure hold one each and
-share nothing, so neither has to wait on the other.
+The [Janet binding](src/bind/janet/README.md) has separate installation and
+usage documentation.
 
 ## Development
 
@@ -279,47 +189,10 @@ $ make
 $ make check
 ```
 
-The Janet binding is built with [Jeep][]:
-
-```console
-$ jeep prep build      # vendor the build files
-$ jeep prep vendor     # vendor the test library
-$ jeep build
-$ jeep test
-```
-
-[Jeep]: https://github.com/pyrmont/jeep
-
-Most of the tests exercise the Janet binding, but `test/core.janet` compiles
-`test/core.c` against the core alone and runs what comes out. Those checks
-cover collision nodes, which need a deliberately colliding hash to exercise;
-`retain` and `release`, which Janet never calls because it traces instead; and
-allocation failure, injected at each point along representative trie updates
-to check that the original remains intact and no partial path leaks.
-
-Building those checks at all is worth something on its own: they include no
-Janet header, so the core failing to be host-agnostic is a link error.
-
-Set `PERSIMMON_SANITISE` to build them with the address and undefined
-behaviour sanitisers, which is what the Linux job in CI does:
-
-```console
-$ PERSIMMON_SANITISE=1 jeep test
-```
-
-The checks are skipped, with a notice, where no C compiler can be found. Set
-`CC` to name one.
-
-The core also has a standalone throughput benchmark. It is kept out of the
-test suite so timing never decides whether a correctness check passes:
-
-```console
-$ janet res/bench/core.janet
-$ janet res/bench/janet.janet
-```
-
-Run it several times on an otherwise idle machine when comparing revisions.
-Set `PERSIMMON_BENCH_SCALE` to an integer from 1 to 100 to lengthen every run.
+The core checks cover collision nodes, element lifecycle callbacks and
+allocation failures without including a host-language header. The
+[Janet binding documentation](src/bind/janet/README.md) describes its build,
+tests and benchmarks.
 
 ## Bugs
 
