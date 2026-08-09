@@ -78,11 +78,22 @@ static void janet_persimm_check_key(Janet key) {
     if (janet_checktype(key, JANET_NIL)) janet_panic("expected a key, got nil");
 }
 
-static int64_t janet_persimm_integer(Janet input) {
+static bool janet_persimm_index(size_t count, Janet input, size_t *index) {
     if (!janet_checktype(input, JANET_NUMBER)) janet_panic("expected index as number");
     int32_t value = janet_unwrap_integer(input);
     if (janet_unwrap_number(input) - (double)value != 0) janet_panic("expected index as integer");
-    return value;
+
+    if (value >= 0) {
+        uint32_t position = (uint32_t)value;
+        if (position >= count) return false;
+        *index = (size_t)position;
+        return true;
+    }
+
+    uint32_t distance = (uint32_t)(-(value + 1)) + 1;
+    if (distance > count) return false;
+    *index = count - (size_t)distance;
+    return true;
 }
 
 /* Unmarshalling moves its unpublished value through a transient one item at a
@@ -363,7 +374,7 @@ static int janet_persimm_vector_get(void *p, Janet key, Janet *out) {
     persimm_vector_t *vector = (persimm_vector_t *)p;
 
     size_t index;
-    if (!persimm_vector_index(vector, janet_persimm_integer(key), &index)) return 0;
+    if (!janet_persimm_index(vector->count, key, &index)) return 0;
 
     *out = janet_persimm_vector_at(vector, index);
     return 1;
@@ -513,7 +524,7 @@ static int janet_persimm_list_get(void *p, Janet key, Janet *out) {
     janet_persimm_list_t *wrapper = (janet_persimm_list_t *)p;
 
     size_t index;
-    if (!persimm_list_index(&wrapper->list, janet_persimm_integer(key), &index)) return 0;
+    if (!janet_persimm_index(wrapper->list.count, key, &index)) return 0;
 
     const void *slot = persimm_list_ref_from(&wrapper->list, &wrapper->cursor, index);
     if (NULL == slot) janet_panic("invalid index");
@@ -984,7 +995,7 @@ static int janet_persimm_vector_transient_get(void *p, Janet key, Janet *out) {
     janet_persimm_require_active(transient->active);
 
     size_t index;
-    if (!persimm_vector_index(&transient->value, janet_persimm_integer(key), &index)) return 0;
+    if (!janet_persimm_index(transient->value.count, key, &index)) return 0;
     *out = janet_persimm_vector_at(&transient->value, index);
     return 1;
 }
@@ -1360,7 +1371,7 @@ static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
         (persimm_vector_t *)janet_getabstract(argv, 0, &persimm_vector_type);
 
     size_t index;
-    if (!persimm_vector_index(old_vector, janet_persimm_integer(argv[1]), &index)) {
+    if (!janet_persimm_index(old_vector->count, argv[1], &index)) {
         janet_panic("index out of bounds");
     }
 
@@ -1496,7 +1507,7 @@ static Janet cfun_persimm_assoc_mut(int32_t argc, Janet *argv) {
         (persimm_vector_transient_t *)janet_getabstract(
             argv, 0, &persimm_vector_transient_type);
     size_t index;
-    if (!persimm_vector_index(&transient->value, janet_persimm_integer(argv[1]), &index)) {
+    if (!janet_persimm_index(transient->value.count, argv[1], &index)) {
         janet_panic("index out of bounds");
     }
     janet_persimm_check(persimm_vector_transient_update(transient, index, argv + 2));

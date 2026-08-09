@@ -53,12 +53,14 @@
   (def vec (persimmon/vec [:foo :bar :qux]))
   (is (= :qux (get vec -1)))
   (is (= :foo (get vec -3)))
-  (is (= nil (get vec -4))))
+  (is (= nil (get vec -4)))
+  (is (= nil (get vec -2147483648))))
 
 
 (deftest get-with-out-of-bounds-index
   (def vec (persimmon/vec [:foo :bar]))
-  (is (= nil (get vec 2))))
+  (is (= nil (get vec 2)))
+  (is (= nil (get vec 2147483647))))
 
 
 (deftest conj-with-vector-with-space-in-tail

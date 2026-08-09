@@ -225,20 +225,6 @@ const void *persimm_vector_ref(const persimm_vector_t *vector, size_t index) {
     return persimm_vector_node_slot(node, index & PERSIMM_MASK, vector->elem_size);
 }
 
-bool persimm_vector_index(const persimm_vector_t *vector, int64_t input, size_t *index) {
-    if (input >= 0) {
-        uint64_t position = (uint64_t)input;
-        if (position >= vector->count) return false;
-        *index = (size_t)position;
-        return true;
-    }
-
-    uint64_t distance = (uint64_t)(-(input + 1)) + 1;
-    if (distance > vector->count) return false;
-    *index = vector->count - (size_t)distance;
-    return true;
-}
-
 /* Inserting */
 
 static void persimm_elem_store(const persimm_vector_t *vector, void *slot, const void *elem) {

@@ -142,20 +142,6 @@ const void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_curso
     return persimm_list_cell_slot(cell);
 }
 
-bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index) {
-    if (input >= 0) {
-        uint64_t position = (uint64_t)input;
-        if (position >= list->count) return false;
-        *index = (size_t)position;
-        return true;
-    }
-
-    uint64_t distance = (uint64_t)(-(input + 1)) + 1;
-    if (distance > list->count) return false;
-    *index = list->count - (size_t)distance;
-    return true;
-}
-
 /* Inserting */
 
 static persimm_status persimm_list_cons_in_place(persimm_list_t *list, const void *elem) {

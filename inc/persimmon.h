@@ -304,12 +304,6 @@ void persimm_vector_deinit(persimm_vector_t *vector);
 const void *persimm_vector_ref(const persimm_vector_t *vector, size_t index);
 
 /*
- * Resolves a possibly negative index against the vector, as hosts that count
- * backwards from the end require. Returns false if the result is out of bounds.
- */
-bool persimm_vector_index(const persimm_vector_t *vector, int64_t input, size_t *index);
-
-/*
  * Appends `elem` to `src`, placing the resulting persistent vector in `dest`.
  * `src` is unchanged and `dest` follows the persistent update contract above.
  * The result shares every node the new path does not need to copy.
@@ -383,8 +377,6 @@ void persimm_list_cursor_reset(persimm_list_cursor_t *cursor);
  */
 const void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
                                   size_t index);
-
-bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index);
 
 /*
  * Prepends `elem` to `src`, leaving it unchanged and placing the resulting

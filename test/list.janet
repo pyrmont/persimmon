@@ -104,12 +104,14 @@
   (def lst (persimmon/list [:foo :bar :qux]))
   (is (= :qux (get lst -1)))
   (is (= :foo (get lst -3)))
-  (is (= nil (get lst -4))))
+  (is (= nil (get lst -4)))
+  (is (= nil (get lst -2147483648))))
 
 
 (deftest get-with-out-of-bounds-index
   (def lst (persimmon/list [:foo :bar]))
-  (is (= nil (get lst 2))))
+  (is (= nil (get lst 2)))
+  (is (= nil (get lst 2147483647))))
 
 
 (deftest next-with-empty-list

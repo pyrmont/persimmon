@@ -902,33 +902,6 @@ static void test_empty_transient_initialisers(void) {
     persimm_set_deinit(&set);
 }
 
-static void test_extreme_indexes(void) {
-    size_t index = 99;
-    int value = 7;
-
-    persimm_vector_t vector;
-    CHECK(PERSIMM_OK == persimm_vector_init(&vector, sizeof(value), NULL, NULL),
-          "index: vector init failed");
-    CHECK(PERSIMM_OK == test_vector_transient_push(&vector, &value),
-          "index: vector push failed");
-    CHECK(!persimm_vector_index(&vector, INT64_MAX, &index),
-          "index: vector accepted INT64_MAX");
-    CHECK(!persimm_vector_index(&vector, INT64_MIN, &index),
-          "index: vector accepted INT64_MIN");
-    CHECK(persimm_vector_index(&vector, -1, &index) && 0 == index,
-          "index: vector rejected -1");
-    persimm_vector_deinit(&vector);
-
-    persimm_list_t list;
-    CHECK(PERSIMM_OK == persimm_list_init(&list, sizeof(value), NULL, NULL),
-          "index: list init failed");
-    CHECK(PERSIMM_OK == test_list_advance_cons(&list, &value), "index: list cons failed");
-    CHECK(!persimm_list_index(&list, INT64_MAX, &index), "index: list accepted INT64_MAX");
-    CHECK(!persimm_list_index(&list, INT64_MIN, &index), "index: list accepted INT64_MIN");
-    CHECK(persimm_list_index(&list, -1, &index) && 0 == index, "index: list rejected -1");
-    persimm_list_deinit(&list);
-}
-
 static void test_cursor_survives_same_count_change(void) {
     persimm_list_t list;
     persimm_list_cursor_t cursor;
@@ -1374,7 +1347,6 @@ int main(void) {
     test_rejects_a_bad_layout();
     test_persistent_operation_contracts();
     test_empty_transient_initialisers();
-    test_extreme_indexes();
     test_cursor_survives_same_count_change();
     test_replacement_may_alias_storage();
     test_rejects_overflowing_allocations();
