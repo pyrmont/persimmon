@@ -52,6 +52,7 @@ two share their whole implementation.
 The compiled source is in two layers, and the directories say which is which.
 
 ```
+inc/                    the public C header
 src/                    the core, which knows no host language
 src/bind/janet/         the Janet binding
 ```
@@ -87,10 +88,24 @@ of structures must not be shared across threads.
 
 ### C
 
-The public C interface is [src/persimmon.h](src/persimmon.h). An embedding can
-compile the files under `src` directly, excluding the Janet wrapper, or link
-the static archive produced by `jeep build` and add `src` to its header search
-path.
+The public C interface is [inc/persimmon.h](inc/persimmon.h). Building the
+core needs a C99 compiler, `make` and `ar`, but no Janet installation:
+
+```console
+$ make
+$ make check
+$ make example
+$ make help
+```
+
+The resulting archive is `_build/core/libpersimmon.a`. `make install` installs
+it under `$PREFIX/lib` and the public header under `$PREFIX/include`, with
+`PREFIX` defaulting to `/usr/local`. `DESTDIR`, `LIBDIR` and `INCLUDEDIR` may
+all be overridden for packaging:
+
+```console
+$ make install DESTDIR=/tmp/package-root PREFIX=/usr
+```
 
 Persistent update functions take separate source and destination structures.
 The destination must be uninitialised and distinct from the source. The source
@@ -105,8 +120,8 @@ no transient because prepending and taking the rest already cost constant time.
 The complete example in [res/examples/core.c](res/examples/core.c) builds with:
 
 ```console
-$ cc -std=c99 -Isrc res/examples/core.c src/persimmon*.c -o persimmon-example
-$ ./persimmon-example
+$ make example
+$ _build/core/persimmon-example
 empty: 0, first: 1
 first: 1, result: 1 2 3 4 5
 ```
@@ -249,7 +264,14 @@ share nothing, so neither has to wait on the other.
 
 ## Development
 
-Persimmon is built with [Jeep][]:
+The core C library is built and checked independently of any host language:
+
+```console
+$ make
+$ make check
+```
+
+The Janet binding is built with [Jeep][]:
 
 ```console
 $ jeep prep build      # vendor the build files

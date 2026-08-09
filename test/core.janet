@@ -60,7 +60,7 @@
                # reports and carries on, which would let a finding pass as green.
                ["-g" "-O1" "-fsanitize=address,undefined" "-fno-sanitize-recover=all"]
                ["-O1"])
-             ["-I" (path "src") "-o" exe (path "test" "core.c")]
+             ["-I" (path "inc") "-o" exe (path "test" "core.c")]
              (sources)))
   (os/execute cmd :p))
 

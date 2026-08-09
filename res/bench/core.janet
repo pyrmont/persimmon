@@ -39,7 +39,7 @@
     (def command
       (array/concat
         @[cc "-std=c99" "-Wall" "-Wextra" "-O3"
-          "-I" (path "src") "-o" exe (path "res" "bench" "core.c")]
+          "-I" (path "inc") "-o" exe (path "res" "bench" "core.c")]
         (sources)))
     (unless (zero? (os/execute command :p))
       (error "could not build the core benchmark"))
