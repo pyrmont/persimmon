@@ -59,7 +59,8 @@ src/bind/janet/         the Janet binding
 
 The files directly under `src` make up the core. Its elements are opaque blobs
 of a fixed size, stored inline in the structure, and it delegates their
-lifecycle to a table of callbacks the host supplies:
+lifecycle to callback tables the host supplies. Vectors and lists use
+`persimm_elem_ops` for their elements; maps use it for their values:
 
 ```c
 typedef struct {
@@ -71,7 +72,14 @@ typedef struct {
 
 A host that reference counts fills in `retain` and `release`; a host with a
 tracing collector fills in `trace`; a host storing plain data passes NULL and
-pays for none of it.
+pays for none of it. Map and set keys use `persimm_key_ops`, which adds the same
+lifecycle callbacks to their hash and equality operations. Maps accept separate
+contexts for their keys and values, so the two need not share a representation
+or ownership scheme.
+
+Operation tables and their contexts are borrowed. They must outlive the
+collection and every clone or transient derived from it; static `const` tables
+are the usual choice.
 
 `src/bind` holds host-language bindings. Its `janet` directory contains the
 reference implementation of that interface. It stores `Janet` values inline,
@@ -127,9 +135,9 @@ first: 1, result: 1 2 3 4 5
 ```
 
 The core stores opaque, fixed-size values inline. Applications storing managed
-objects supply `persimm_elem_ops`; maps additionally describe their entry
-layout and, where byte hashing is unsuitable, their key operations. The public
-header documents these host integration contracts in full.
+objects supply lifecycle callbacks; maps additionally describe their entry
+layout and key operations. The public header documents these host integration
+contracts in full.
 
 The repository also includes a Janet wrapper as an example of how Persimmon
 can be integrated into another language.

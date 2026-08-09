@@ -12,7 +12,7 @@
 /* Configuring */
 
 static void persimm_set_hamt(const persimm_set_t *set, persimm_hamt_t *hamt) {
-    persimm_hamt_config(hamt, &set->layout, set->ops, set->key_ops, set->ctx);
+    persimm_hamt_config(hamt, &set->layout, NULL, NULL, set->key_ops, set->key_ctx);
 }
 
 static persimm_status persimm_set_conj_in_place(persimm_set_t *set, const void *elem,
@@ -22,16 +22,15 @@ static persimm_status persimm_set_disj_in_place(persimm_set_t *set, const void *
 
 /* Initialising */
 
-persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size, const persimm_elem_ops *ops,
-                                const persimm_key_ops *key_ops, void *ctx) {
+persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size,
+                                const persimm_key_ops *key_ops, void *key_ctx) {
     set->count = 0;
     set->layout.entry_size = elem_size;
     set->layout.key_size = elem_size;
     set->layout.value_offset = 0;
     set->layout.value_size = 0;
-    set->ops = ops;
     set->key_ops = key_ops;
-    set->ctx = ctx;
+    set->key_ctx = key_ctx;
     set->root = NULL;
 
     if (0 == elem_size) return PERSIMM_ERR_INVALID;
@@ -42,9 +41,8 @@ persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size, const pers
 void persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest) {
     dest->count = src->count;
     dest->layout = src->layout;
-    dest->ops = src->ops;
     dest->key_ops = src->key_ops;
-    dest->ctx = src->ctx;
+    dest->key_ctx = src->key_ctx;
     dest->root = src->root;
     persimm_hamt_retain(dest->root);
 }
@@ -57,9 +55,9 @@ void persimm_set_to_transient(const persimm_set_t *src, persimm_set_transient_t 
 }
 
 persimm_status persimm_set_transient_init(persimm_set_transient_t *transient,
-                                          size_t elem_size, const persimm_elem_ops *ops,
-                                          const persimm_key_ops *key_ops, void *ctx) {
-    persimm_status status = persimm_set_init(&transient->value, elem_size, ops, key_ops, ctx);
+                                          size_t elem_size, const persimm_key_ops *key_ops,
+                                          void *key_ctx) {
+    persimm_status status = persimm_set_init(&transient->value, elem_size, key_ops, key_ctx);
     transient->active = PERSIMM_OK == status;
     return status;
 }

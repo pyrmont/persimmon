@@ -40,7 +40,7 @@ static bool int_equals(const void *a, const void *b, size_t key_size, void *ctx)
     return *(const int *)a == *(const int *)b;
 }
 
-static const persimm_key_ops int_key_ops = { int_hash, int_equals };
+static const persimm_key_ops int_key_ops = { int_hash, int_equals, NULL, NULL, NULL };
 
 static void check(persimm_status status, const char *operation) {
     if (PERSIMM_OK == status) return;
@@ -172,7 +172,7 @@ static void benchmark_map(void) {
     size_t count = scaled(150000);
     persimm_map_t map;
     persimm_map_transient_t transient;
-    check(persimm_map_transient_init(&transient, &entry_layout, NULL, &int_key_ops, NULL),
+    check(persimm_map_transient_init(&transient, &entry_layout, NULL, NULL, &int_key_ops, NULL),
           "map transient init");
 
     clock_t start = clock();
@@ -197,7 +197,7 @@ static void benchmark_map(void) {
     persimm_map_deinit(&map);
 
     count = scaled(75000);
-    check(persimm_map_init(&map, &entry_layout, NULL, &int_key_ops, NULL), "map init");
+    check(persimm_map_init(&map, &entry_layout, NULL, NULL, &int_key_ops, NULL), "map init");
     start = clock();
     for (size_t i = 0; i < count; i++) {
         persimm_map_t next;
@@ -219,7 +219,7 @@ static void benchmark_map(void) {
     report("map dissoc (persistent)", count, seconds_since(start));
     persimm_map_deinit(&map);
 
-    check(persimm_map_transient_init(&transient, &entry_layout, NULL, &int_key_ops, NULL),
+    check(persimm_map_transient_init(&transient, &entry_layout, NULL, NULL, &int_key_ops, NULL),
           "map transient init");
     start = clock();
     for (size_t i = 0; i < count; i++) {

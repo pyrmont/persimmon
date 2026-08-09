@@ -177,10 +177,12 @@ static inline void persimm_elem_release(const persimm_elem_ops *ops, void *ctx,
  */
 typedef struct {
     persimm_entry_layout layout;
-    const persimm_elem_ops *ops;
+    const persimm_elem_ops *value_ops;
+    const persimm_key_ops *key_ops;
     uint32_t (*hash)(const void *key, size_t key_size, void *ctx);
     bool (*equals)(const void *key_a, const void *key_b, size_t key_size, void *ctx);
-    void *ctx;
+    void *value_ctx;
+    void *key_ctx;
 } persimm_hamt_t;
 
 /*
@@ -188,7 +190,8 @@ typedef struct {
  * test for a NULL callback on its way down the trie.
  */
 void persimm_hamt_config(persimm_hamt_t *hamt, const persimm_entry_layout *layout,
-                         const persimm_elem_ops *ops, const persimm_key_ops *key_ops, void *ctx);
+                         const persimm_elem_ops *value_ops, void *value_ctx,
+                         const persimm_key_ops *key_ops, void *key_ctx);
 
 bool persimm_hamt_layout_valid(const persimm_entry_layout *layout);
 

@@ -109,8 +109,8 @@ static bool int_equals(const void *key_a, const void *key_b, size_t key_size, vo
     return *(const int *)key_a == *(const int *)key_b;
 }
 
-static const persimm_key_ops spread_ops = { int_hash, int_equals };
-static const persimm_key_ops crowded_ops = { crowded_hash, int_equals };
+static const persimm_key_ops spread_ops = { int_hash, int_equals, NULL, NULL, NULL };
+static const persimm_key_ops crowded_ops = { crowded_hash, int_equals, NULL, NULL, NULL };
 
 static uint32_t zero_hash(const void *key, size_t key_size, void *ctx) {
     (void) key;
@@ -119,7 +119,7 @@ static uint32_t zero_hash(const void *key, size_t key_size, void *ctx) {
     return 0;
 }
 
-static const persimm_key_ops zero_hash_ops = { zero_hash, NULL };
+static const persimm_key_ops zero_hash_ops = { zero_hash, NULL, NULL, NULL, NULL };
 
 /* Test Construction Helpers */
 
@@ -252,7 +252,7 @@ static size_t drain(const persimm_map_t *map, entry_t *into) {
 
 static void test_assoc_and_ref(const persimm_key_ops *ops, const char *label, int n) {
     persimm_map_t map;
-    persimm_map_init(&map, &map_layout, NULL, ops, NULL);
+    persimm_map_init(&map, &map_layout, NULL, NULL, ops, NULL);
 
     for (int i = 0; i < n; i++) {
         entry_t entry = { i, i * 3 };
@@ -283,7 +283,7 @@ static void test_assoc_and_ref(const persimm_key_ops *ops, const char *label, in
 /* Walking with next must produce what walking with foreach produces. */
 static void test_iteration_agrees(const persimm_key_ops *ops, const char *label, int n) {
     persimm_map_t map;
-    persimm_map_init(&map, &map_layout, NULL, ops, NULL);
+    persimm_map_init(&map, &map_layout, NULL, NULL, ops, NULL);
     for (int i = 0; i < n; i++) {
         entry_t entry = { i, i };
         test_map_transient_assoc(&map, &entry);
@@ -312,7 +312,7 @@ static void test_iteration_agrees(const persimm_key_ops *ops, const char *label,
 
 static void test_dissoc(const persimm_key_ops *ops, const char *label, int n) {
     persimm_map_t map;
-    persimm_map_init(&map, &map_layout, NULL, ops, NULL);
+    persimm_map_init(&map, &map_layout, NULL, NULL, ops, NULL);
     for (int i = 0; i < n; i++) {
         entry_t entry = { i, i };
         test_map_transient_assoc(&map, &entry);
@@ -358,9 +358,9 @@ static void test_canonical(const persimm_key_ops *ops, const char *label, int n,
     persimm_map_t forward;
     persimm_map_t backward;
     persimm_map_t pruned;
-    persimm_map_init(&forward, &map_layout, NULL, ops, NULL);
-    persimm_map_init(&backward, &map_layout, NULL, ops, NULL);
-    persimm_map_init(&pruned, &map_layout, NULL, ops, NULL);
+    persimm_map_init(&forward, &map_layout, NULL, NULL, ops, NULL);
+    persimm_map_init(&backward, &map_layout, NULL, NULL, ops, NULL);
+    persimm_map_init(&pruned, &map_layout, NULL, NULL, ops, NULL);
 
     for (int i = 0; i < n; i++) {
         entry_t entry = { i, i };
@@ -404,7 +404,7 @@ static void test_canonical(const persimm_key_ops *ops, const char *label, int n,
 /* Changing a map that shares nodes must leave what it shares them with alone. */
 static void test_sharing(const persimm_key_ops *ops, const char *label, int n) {
     persimm_map_t base;
-    persimm_map_init(&base, &map_layout, NULL, ops, NULL);
+    persimm_map_init(&base, &map_layout, NULL, NULL, ops, NULL);
     for (int i = 0; i < n; i++) {
         entry_t entry = { i, i };
         test_map_transient_assoc(&base, &entry);
@@ -463,7 +463,7 @@ static void test_sharing(const persimm_key_ops *ops, const char *label, int n) {
  */
 static void test_set(const persimm_key_ops *ops, const char *label, int n) {
     persimm_set_t set;
-    persimm_set_init(&set, sizeof(int), NULL, ops, NULL);
+    persimm_set_init(&set, sizeof(int), ops, NULL);
 
     for (int i = 0; i < n; i++) {
         CHECK(PERSIMM_OK == test_set_transient_conj(&set, &i), "%s: conj %d", label, i);
@@ -500,15 +500,70 @@ static int rc_underflows = 0;
 
 static void rc_retain(const void *slot, void *ctx) {
     (void) ctx;
-    live[*(int *)slot]++;
+    live[*(const int *)slot]++;
 }
 
 static void rc_release(const void *slot, void *ctx) {
     (void) ctx;
-    if (--live[*(int *)slot] < 0) rc_underflows++;
+    if (--live[*(const int *)slot] < 0) rc_underflows++;
 }
 
 static const persimm_elem_ops rc_ops = { rc_retain, rc_release, NULL };
+
+static persimm_key_ops rc_key_ops(const persimm_key_ops *ops) {
+    persimm_key_ops managed = *ops;
+    managed.retain = rc_retain;
+    managed.release = rc_release;
+    return managed;
+}
+
+typedef struct {
+    int retained;
+    int released;
+    int traced;
+} lifecycle_counts;
+
+static void count_retain(const void *slot, void *ctx) {
+    (void) slot;
+    ((lifecycle_counts *)ctx)->retained++;
+}
+
+static void count_release(const void *slot, void *ctx) {
+    (void) slot;
+    ((lifecycle_counts *)ctx)->released++;
+}
+
+static void count_trace(const void *slot, void *ctx) {
+    (void) slot;
+    ((lifecycle_counts *)ctx)->traced++;
+}
+
+static void test_map_separates_key_and_value_lifecycles(void) {
+    lifecycle_counts keys = { 0, 0, 0 };
+    lifecycle_counts values = { 0, 0, 0 };
+    persimm_key_ops key_ops = {
+        int_hash, int_equals, count_retain, count_release, count_trace
+    };
+    persimm_elem_ops value_ops = { count_retain, count_release, count_trace };
+
+    persimm_map_t map;
+    CHECK(PERSIMM_OK ==
+              persimm_map_init(&map, &map_layout, &value_ops, &values, &key_ops, &keys),
+          "lifecycles: map init failed");
+    entry_t entry = { 1, 2 };
+    CHECK(PERSIMM_OK == test_map_transient_assoc(&map, &entry),
+          "lifecycles: map assoc failed");
+    CHECK(1 == keys.retained && 1 == values.retained,
+          "lifecycles: map did not retain key and value separately");
+
+    persimm_map_trace(&map);
+    CHECK(1 == keys.traced && 1 == values.traced,
+          "lifecycles: map did not trace key and value separately");
+
+    persimm_map_deinit(&map);
+    CHECK(1 == keys.released && 1 == values.released,
+          "lifecycles: map did not release key and value separately");
+}
 
 static void check_live(const char *label, const char *when, int lo, int hi) {
     int wrong = 0;
@@ -524,8 +579,10 @@ static void test_map_refcounts(const persimm_key_ops *ops, const char *label, in
     memset(live, 0, sizeof(live));
     rc_underflows = 0;
 
+    persimm_key_ops managed_keys = rc_key_ops(ops);
+
     persimm_map_t base;
-    persimm_map_init(&base, &map_layout, &rc_ops, ops, NULL);
+    persimm_map_init(&base, &map_layout, &rc_ops, NULL, &managed_keys, NULL);
     for (int i = 0; i < n; i++) {
         entry_t entry = { i, RC_VALUE_BASE + i };
         test_map_transient_assoc(&base, &entry);
@@ -568,8 +625,10 @@ static void test_set_refcounts(const persimm_key_ops *ops, const char *label, in
     memset(live, 0, sizeof(live));
     rc_underflows = 0;
 
+    persimm_key_ops managed_keys = rc_key_ops(ops);
+
     persimm_set_t base;
-    persimm_set_init(&base, sizeof(int), &rc_ops, ops, NULL);
+    persimm_set_init(&base, sizeof(int), &managed_keys, NULL);
     for (int i = 0; i < n; i++) test_set_transient_conj(&base, &i);
 
     /* A set's entries have no value, so nothing above the elements is held. */
@@ -602,7 +661,7 @@ static void test_set_refcounts(const persimm_key_ops *ops, const char *label, in
    the key's bytes, and memcmp. */
 static void test_byte_defaults(void) {
     persimm_map_t map;
-    persimm_map_init(&map, &map_layout, NULL, NULL, NULL);
+    persimm_map_init(&map, &map_layout, NULL, NULL, NULL, NULL);
 
     for (int i = 0; i < 500; i++) {
         entry_t entry = { i, i * 2 };
@@ -621,22 +680,24 @@ static void test_rejects_a_bad_layout(void) {
     persimm_map_t map;
 
     persimm_entry_layout no_key = { sizeof(entry_t), 0, 4, 4 };
-    CHECK(PERSIMM_ERR_INVALID == persimm_map_init(&map, &no_key, NULL, NULL, NULL),
+    CHECK(PERSIMM_ERR_INVALID == persimm_map_init(&map, &no_key, NULL, NULL, NULL, NULL),
           "layout: a key of no size was accepted");
     persimm_map_deinit(&map);
 
     persimm_entry_layout overlapping = { 8, 4, 2, 4 };
-    CHECK(PERSIMM_ERR_INVALID == persimm_map_init(&map, &overlapping, NULL, NULL, NULL),
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_map_init(&map, &overlapping, NULL, NULL, NULL, NULL),
           "layout: a value inside the key was accepted");
     persimm_map_deinit(&map);
 
     persimm_entry_layout overrunning = { 8, 4, 4, 8 };
-    CHECK(PERSIMM_ERR_INVALID == persimm_map_init(&map, &overrunning, NULL, NULL, NULL),
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_map_init(&map, &overrunning, NULL, NULL, NULL, NULL),
           "layout: a value past the end of the entry was accepted");
     persimm_map_deinit(&map);
 
     persimm_set_t set;
-    CHECK(PERSIMM_ERR_INVALID == persimm_set_init(&set, 0, NULL, NULL, NULL),
+    CHECK(PERSIMM_ERR_INVALID == persimm_set_init(&set, 0, NULL, NULL),
           "layout: an element of no size was accepted");
     persimm_set_deinit(&set);
 }
@@ -697,7 +758,8 @@ static void test_persistent_operation_contracts(void) {
     persimm_map_t associated;
     persimm_map_t dissociated;
     entry_t entry = { one, two };
-    CHECK(PERSIMM_OK == persimm_map_init(&map, &map_layout, NULL, &spread_ops, NULL),
+    CHECK(PERSIMM_OK ==
+              persimm_map_init(&map, &map_layout, NULL, NULL, &spread_ops, NULL),
           "contract: map init failed");
     CHECK(PERSIMM_OK == persimm_map_assoc(&map, &entry, &associated),
           "contract: map assoc failed");
@@ -718,7 +780,7 @@ static void test_persistent_operation_contracts(void) {
     persimm_set_t set;
     persimm_set_t conjoined;
     persimm_set_t disjoined;
-    CHECK(PERSIMM_OK == persimm_set_init(&set, sizeof(int), NULL, &spread_ops, NULL),
+    CHECK(PERSIMM_OK == persimm_set_init(&set, sizeof(int), &spread_ops, NULL),
           "contract: set init failed");
     CHECK(PERSIMM_OK == persimm_set_conj(&set, &one, &conjoined),
           "contract: set conj failed");
@@ -757,7 +819,7 @@ static void test_empty_transient_initialisers(void) {
     persimm_map_t map;
     entry_t entry = { value, value * 2 };
     CHECK(PERSIMM_OK == persimm_map_transient_init(
-                              &map_transient, &map_layout, NULL, &spread_ops, NULL),
+                              &map_transient, &map_layout, NULL, NULL, &spread_ops, NULL),
           "transient init: map init failed");
     CHECK(PERSIMM_OK == persimm_map_transient_assoc(&map_transient, &entry),
           "transient init: map assoc failed");
@@ -770,7 +832,7 @@ static void test_empty_transient_initialisers(void) {
     persimm_set_transient_t set_transient;
     persimm_set_t set;
     CHECK(PERSIMM_OK == persimm_set_transient_init(
-                              &set_transient, sizeof(int), NULL, &spread_ops, NULL),
+                              &set_transient, sizeof(int), &spread_ops, NULL),
           "transient init: set init failed");
     CHECK(PERSIMM_OK == persimm_set_transient_conj(&set_transient, &value),
           "transient init: set conj failed");
@@ -850,7 +912,8 @@ static void test_replacement_may_alias_storage(void) {
 
     persimm_map_t map;
     entry_t entry = { 23, RC_VALUE_BASE + 23 };
-    persimm_map_init(&map, &map_layout, &rc_ops, &spread_ops, NULL);
+    persimm_key_ops managed_keys = rc_key_ops(&spread_ops);
+    persimm_map_init(&map, &map_layout, &rc_ops, NULL, &managed_keys, NULL);
     test_map_transient_assoc(&map, &entry);
     stored = persimm_map_ref_entry(&map, &entry.key);
     CHECK(PERSIMM_OK == test_map_transient_assoc(&map, stored),
@@ -878,14 +941,14 @@ static void test_rejects_overflowing_allocations(void) {
 
     persimm_entry_layout huge = { SIZE_MAX, 1, 0, 0 };
     persimm_map_t map;
-    CHECK(PERSIMM_OK == persimm_map_init(&map, &huge, NULL, &zero_hash_ops, NULL),
+    CHECK(PERSIMM_OK == persimm_map_init(&map, &huge, NULL, NULL, &zero_hash_ops, NULL),
           "allocation: huge map layout was rejected before use");
     CHECK(PERSIMM_ERR_ALLOC == test_map_transient_assoc(&map, &value),
           "allocation: map size overflow was accepted");
     persimm_map_deinit(&map);
 
     persimm_set_t set;
-    CHECK(PERSIMM_OK == persimm_set_init(&set, SIZE_MAX, NULL, &zero_hash_ops, NULL),
+    CHECK(PERSIMM_OK == persimm_set_init(&set, SIZE_MAX, &zero_hash_ops, NULL),
           "allocation: huge set layout was rejected before use");
     CHECK(PERSIMM_ERR_ALLOC == test_set_transient_conj(&set, &value),
           "allocation: set size overflow was accepted");
@@ -930,7 +993,8 @@ static void test_map_transient(void) {
     rc_underflows = 0;
 
     persimm_map_t base;
-    persimm_map_init(&base, &map_layout, &rc_ops, &spread_ops, NULL);
+    persimm_key_ops managed_keys = rc_key_ops(&spread_ops);
+    persimm_map_init(&base, &map_layout, &rc_ops, NULL, &managed_keys, NULL);
     for (int i = 0; i < 100; i++) {
         entry_t entry = { i, RC_VALUE_BASE + i };
         test_map_transient_assoc(&base, &entry);
@@ -968,7 +1032,7 @@ static void test_map_transient(void) {
 
 static void test_set_transient(void) {
     persimm_set_t base;
-    persimm_set_init(&base, sizeof(int), NULL, &spread_ops, NULL);
+    persimm_set_init(&base, sizeof(int), &spread_ops, NULL);
     for (int i = 0; i < 100; i++) test_set_transient_conj(&base, &i);
 
     persimm_set_transient_t transient;
@@ -1026,7 +1090,7 @@ static void test_persistent_failure_contracts(void) {
     persimm_map_t map;
     persimm_map_t map_dest;
     entry_t entry = { value, value };
-    persimm_map_init(&map, &map_layout, NULL, &spread_ops, NULL);
+    persimm_map_init(&map, &map_layout, NULL, NULL, &spread_ops, NULL);
     fail_allocation_after(0);
     CHECK(PERSIMM_ERR_ALLOC == persimm_map_assoc(&map, &entry, &map_dest),
           "contract: failed map assoc returned the wrong status");
@@ -1038,7 +1102,7 @@ static void test_persistent_failure_contracts(void) {
 
     persimm_set_t set;
     persimm_set_t set_dest;
-    persimm_set_init(&set, sizeof(int), NULL, &spread_ops, NULL);
+    persimm_set_init(&set, sizeof(int), &spread_ops, NULL);
     fail_allocation_after(0);
     CHECK(PERSIMM_ERR_ALLOC == persimm_set_conj(&set, &value, &set_dest),
           "contract: failed set conj returned the wrong status");
@@ -1078,7 +1142,7 @@ static void test_transient_allocation_failures(void) {
     persimm_vector_deinit(&vector);
 
     persimm_map_t map;
-    persimm_map_init(&map, &map_layout, NULL, &spread_ops, NULL);
+    persimm_map_init(&map, &map_layout, NULL, NULL, &spread_ops, NULL);
     for (int i = 0; i < 64; i++) {
         entry_t entry = { i, i };
         test_map_transient_assoc(&map, &entry);
@@ -1102,7 +1166,7 @@ static void test_transient_allocation_failures(void) {
 }
 
 static void build_fault_map(persimm_map_t *map, const persimm_key_ops *ops) {
-    persimm_map_init(map, &map_layout, NULL, ops, NULL);
+    persimm_map_init(map, &map_layout, NULL, NULL, ops, NULL);
     for (int i = 0; i < 64; i++) {
         entry_t entry = { i, i };
         CHECK(PERSIMM_OK == test_map_transient_assoc(map, &entry),
@@ -1173,7 +1237,7 @@ static void test_collision_reparent_allocation_failures(void) {
     for (int fail = 0; fail < 32 && !reached_success; fail++) {
         persimm_map_t base;
         persimm_map_t copy;
-        persimm_map_init(&base, &map_layout, NULL, &crowded_ops, NULL);
+        persimm_map_init(&base, &map_layout, NULL, NULL, &crowded_ops, NULL);
         entry_t first = { 0, 0 };
         entry_t second = { 4, 4 };
         test_map_transient_assoc(&base, &first);
@@ -1239,6 +1303,7 @@ int main(void) {
     }
 
     test_byte_defaults();
+    test_map_separates_key_and_value_lifecycles();
     test_rejects_a_bad_layout();
     test_persistent_operation_contracts();
     test_empty_transient_initialisers();

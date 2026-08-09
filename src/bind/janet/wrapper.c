@@ -57,7 +57,10 @@ static bool janet_persimm_equals_key(const void *key_a, const void *key_b, size_
 
 static const persimm_key_ops janet_persimm_key_ops = {
     janet_persimm_hash_key,
-    janet_persimm_equals_key
+    janet_persimm_equals_key,
+    NULL, /* Retain */
+    NULL, /* Release */
+    janet_persimm_trace
 };
 
 /* Utility Methods */
@@ -770,7 +773,7 @@ static void janet_persimm_map_marshal(void *p, JanetMarshalContext *ctx) {
 static void *janet_persimm_map_unmarshal(JanetMarshalContext *ctx) {
     persimm_map_t *map = (persimm_map_t *)janet_unmarshal_abstract(ctx, sizeof(persimm_map_t));
     janet_persimm_check(persimm_map_init(map, &janet_persimm_map_layout, &janet_persimm_ops,
-                                         &janet_persimm_key_ops, NULL));
+                                         NULL, &janet_persimm_key_ops, NULL));
 
     size_t count = janet_persimm_unmarshal_count(ctx);
     for (size_t i = 0; i < count; i++) {
@@ -918,8 +921,8 @@ static void janet_persimm_set_marshal(void *p, JanetMarshalContext *ctx) {
 
 static void *janet_persimm_set_unmarshal(JanetMarshalContext *ctx) {
     persimm_set_t *set = (persimm_set_t *)janet_unmarshal_abstract(ctx, sizeof(persimm_set_t));
-    janet_persimm_check(persimm_set_init(set, sizeof(Janet), &janet_persimm_ops,
-                                         &janet_persimm_key_ops, NULL));
+    janet_persimm_check(
+        persimm_set_init(set, sizeof(Janet), &janet_persimm_key_ops, NULL));
 
     size_t count = janet_persimm_unmarshal_count(ctx);
     for (size_t i = 0; i < count; i++) {
@@ -1165,7 +1168,7 @@ static persimm_map_t *janet_persimm_alloc_map(void) {
 static persimm_map_t *janet_persimm_new_map(void) {
     persimm_map_t *map = janet_persimm_alloc_map();
     janet_persimm_check(persimm_map_init(map, &janet_persimm_map_layout, &janet_persimm_ops,
-                                         &janet_persimm_key_ops, NULL));
+                                         NULL, &janet_persimm_key_ops, NULL));
     return map;
 }
 
@@ -1175,8 +1178,8 @@ static persimm_set_t *janet_persimm_alloc_set(void) {
 
 static persimm_set_t *janet_persimm_new_set(void) {
     persimm_set_t *set = janet_persimm_alloc_set();
-    janet_persimm_check(persimm_set_init(set, sizeof(Janet), &janet_persimm_ops,
-                                         &janet_persimm_key_ops, NULL));
+    janet_persimm_check(
+        persimm_set_init(set, sizeof(Janet), &janet_persimm_key_ops, NULL));
     return set;
 }
 

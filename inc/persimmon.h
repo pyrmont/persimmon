@@ -26,13 +26,14 @@ typedef enum {
 
 const char *persimm_status_string(persimm_status status);
 
-/* Elements */
+/* Element and Value Lifecycles */
 
 /*
  * Each callback receives a read-only pointer to the element's storage slot,
  * not the element itself. A host storing pointers reads through twice, e.g.
  * `Py_DECREF(*(PyObject *const *)slot)`. Any callback may be NULL, as may the
- * whole table, in which case elements are treated as plain data.
+ * whole table, in which case elements are treated as plain data. Vectors and
+ * lists use this table for their elements; maps use it for their values.
  *
  * `retain` is called whenever a new reference to an element comes into
  * existence: when one is inserted, and for every live element of a leaf that
@@ -64,19 +65,32 @@ typedef struct {
 } persimm_entry_layout;
 
 /*
- * Keys are hashed and compared through this table. Either callback may be
- * NULL, as may the whole table, in which case keys are hashed as bytes with
- * FNV-1a and compared with memcmp.
+ * Map and set keys are hashed, compared and managed through this table. Any
+ * callback may be NULL, as may the whole table. Missing hash and equality
+ * callbacks use FNV-1a over the key bytes and memcmp respectively; missing
+ * lifecycle callbacks do nothing.
  *
  * The two must agree: keys that compare equal have to hash equally, or a
  * lookup will miss an entry the map holds. Note that the byte defaults do not
  * agree for a key type with padding bytes or several representations of one
  * value, which is why a host with such keys must supply both.
+ *
+ * `retain`, `release` and `trace` have the same slot and lifecycle semantics
+ * as their `persimm_elem_ops` counterparts. For a map they apply only to its
+ * keys; values use the separate element table.
  */
 typedef struct {
     uint32_t (*hash)(const void *key, size_t key_size, void *ctx);
     bool (*equals)(const void *key_a, const void *key_b, size_t key_size, void *ctx);
+    void (*retain)(const void *slot, void *ctx);
+    void (*release)(const void *slot, void *ctx);
+    void (*trace)(const void *slot, void *ctx);
 } persimm_key_ops;
+
+/*
+ * Operation tables and contexts are borrowed rather than copied. They must
+ * outlive the collection and every clone or transient derived from it.
+ */
 
 /* Types */
 
@@ -143,9 +157,10 @@ typedef struct {
 typedef struct {
     size_t count;
     persimm_entry_layout layout;
-    const persimm_elem_ops *ops;
+    const persimm_elem_ops *value_ops;
     const persimm_key_ops *key_ops;
-    void *ctx;
+    void *value_ctx;
+    void *key_ctx;
     struct persimm_hamt_node *root;
 } persimm_map_t;
 
@@ -156,9 +171,8 @@ typedef struct {
 typedef struct {
     size_t count;
     persimm_entry_layout layout;
-    const persimm_elem_ops *ops;
     const persimm_key_ops *key_ops;
-    void *ctx;
+    void *key_ctx;
     struct persimm_hamt_node *root;
 } persimm_set_t;
 
@@ -233,8 +247,8 @@ persimm_status persimm_vector_transient_persist(persimm_vector_transient_t *tran
 void persimm_map_to_transient(const persimm_map_t *src, persimm_map_transient_t *transient);
 persimm_status persimm_map_transient_init(persimm_map_transient_t *transient,
                                           const persimm_entry_layout *layout,
-                                          const persimm_elem_ops *ops,
-                                          const persimm_key_ops *key_ops, void *ctx);
+                                          const persimm_elem_ops *value_ops, void *value_ctx,
+                                          const persimm_key_ops *key_ops, void *key_ctx);
 void persimm_map_transient_deinit(persimm_map_transient_t *transient);
 persimm_status persimm_map_transient_assoc(persimm_map_transient_t *transient,
                                            const void *entry);
@@ -245,8 +259,8 @@ persimm_status persimm_map_transient_persist(persimm_map_transient_t *transient,
 
 void persimm_set_to_transient(const persimm_set_t *src, persimm_set_transient_t *transient);
 persimm_status persimm_set_transient_init(persimm_set_transient_t *transient,
-                                          size_t elem_size, const persimm_elem_ops *ops,
-                                          const persimm_key_ops *key_ops, void *ctx);
+                                          size_t elem_size, const persimm_key_ops *key_ops,
+                                          void *key_ctx);
 void persimm_set_transient_deinit(persimm_set_transient_t *transient);
 persimm_status persimm_set_transient_conj(persimm_set_transient_t *transient,
                                           const void *elem);
@@ -389,13 +403,14 @@ void persimm_list_trace(const persimm_list_t *list);
 
 /*
  * Prepares an empty map for use. `layout` is copied and must describe an entry
- * whose key starts at offset zero and whose value lies within it; `ops`,
- * `key_ops` and `ctx` may be NULL. Nothing is allocated until the first entry
- * is stored.
+ * whose key starts at offset zero and whose value lies within it. `value_ops`
+ * manages values, while `key_ops` hashes, compares and manages keys. Either
+ * table and either context may be NULL. Nothing is allocated until the first
+ * entry is stored.
  */
 persimm_status persimm_map_init(persimm_map_t *map, const persimm_entry_layout *layout,
-                                const persimm_elem_ops *ops, const persimm_key_ops *key_ops,
-                                void *ctx);
+                                const persimm_elem_ops *value_ops, void *value_ctx,
+                                const persimm_key_ops *key_ops, void *key_ctx);
 
 /*
  * Points `dest` at the same storage as `src`, sharing its structure. `dest`
@@ -459,18 +474,19 @@ void persimm_map_foreach(const persimm_map_t *map, persimm_visit_fn fn, void *ct
 const void *persimm_map_next(const persimm_map_t *map, const void *key);
 
 /*
- * Calls the element table's `trace` callback for every key and every value.
+ * Calls the key table's `trace` callback for every key and the value table's
+ * callback for every value.
  */
 void persimm_map_trace(const persimm_map_t *map);
 
 /* Sets */
 
 /*
- * Prepares an empty set for use. `elem_size` must be non-zero; `ops`,
- * `key_ops` and `ctx` may be NULL.
+ * Prepares an empty set for use. `elem_size` must be non-zero; `key_ops` and
+ * `key_ctx` may be NULL.
  */
-persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size, const persimm_elem_ops *ops,
-                                const persimm_key_ops *key_ops, void *ctx);
+persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size,
+                                const persimm_key_ops *key_ops, void *key_ctx);
 
 void persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest);
 

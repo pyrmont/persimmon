@@ -11,7 +11,8 @@
 /* Configuring */
 
 static void persimm_map_hamt(const persimm_map_t *map, persimm_hamt_t *hamt) {
-    persimm_hamt_config(hamt, &map->layout, map->ops, map->key_ops, map->ctx);
+    persimm_hamt_config(hamt, &map->layout, map->value_ops, map->value_ctx, map->key_ops,
+                        map->key_ctx);
 }
 
 static persimm_status persimm_map_assoc_in_place(persimm_map_t *map, const void *entry,
@@ -22,13 +23,14 @@ static persimm_status persimm_map_dissoc_in_place(persimm_map_t *map, const void
 /* Initialising */
 
 persimm_status persimm_map_init(persimm_map_t *map, const persimm_entry_layout *layout,
-                                const persimm_elem_ops *ops, const persimm_key_ops *key_ops,
-                                void *ctx) {
+                                const persimm_elem_ops *value_ops, void *value_ctx,
+                                const persimm_key_ops *key_ops, void *key_ctx) {
     map->count = 0;
     map->layout = *layout;
-    map->ops = ops;
+    map->value_ops = value_ops;
     map->key_ops = key_ops;
-    map->ctx = ctx;
+    map->value_ctx = value_ctx;
+    map->key_ctx = key_ctx;
     map->root = NULL;
 
     if (!persimm_hamt_layout_valid(layout)) return PERSIMM_ERR_INVALID;
@@ -39,9 +41,10 @@ persimm_status persimm_map_init(persimm_map_t *map, const persimm_entry_layout *
 void persimm_map_clone(const persimm_map_t *src, persimm_map_t *dest) {
     dest->count = src->count;
     dest->layout = src->layout;
-    dest->ops = src->ops;
+    dest->value_ops = src->value_ops;
     dest->key_ops = src->key_ops;
-    dest->ctx = src->ctx;
+    dest->value_ctx = src->value_ctx;
+    dest->key_ctx = src->key_ctx;
     dest->root = src->root;
     persimm_hamt_retain(dest->root);
 }
@@ -55,9 +58,10 @@ void persimm_map_to_transient(const persimm_map_t *src, persimm_map_transient_t 
 
 persimm_status persimm_map_transient_init(persimm_map_transient_t *transient,
                                           const persimm_entry_layout *layout,
-                                          const persimm_elem_ops *ops,
-                                          const persimm_key_ops *key_ops, void *ctx) {
-    persimm_status status = persimm_map_init(&transient->value, layout, ops, key_ops, ctx);
+                                          const persimm_elem_ops *value_ops, void *value_ctx,
+                                          const persimm_key_ops *key_ops, void *key_ctx) {
+    persimm_status status = persimm_map_init(&transient->value, layout, value_ops, value_ctx,
+                                             key_ops, key_ctx);
     transient->active = PERSIMM_OK == status;
     return status;
 }

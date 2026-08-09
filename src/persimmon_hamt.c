@@ -110,14 +110,17 @@ static bool persimm_hamt_byte_equals(const void *key_a, const void *key_b, size_
 }
 
 void persimm_hamt_config(persimm_hamt_t *hamt, const persimm_entry_layout *layout,
-                         const persimm_elem_ops *ops, const persimm_key_ops *key_ops, void *ctx) {
+                         const persimm_elem_ops *value_ops, void *value_ctx,
+                         const persimm_key_ops *key_ops, void *key_ctx) {
     hamt->layout = *layout;
-    hamt->ops = ops;
+    hamt->value_ops = value_ops;
+    hamt->key_ops = key_ops;
     hamt->hash = (NULL != key_ops && NULL != key_ops->hash) ? key_ops->hash
                                                             : persimm_hamt_byte_hash;
     hamt->equals = (NULL != key_ops && NULL != key_ops->equals) ? key_ops->equals
                                                                 : persimm_hamt_byte_equals;
-    hamt->ctx = ctx;
+    hamt->value_ctx = value_ctx;
+    hamt->key_ctx = key_ctx;
 }
 
 bool persimm_hamt_layout_valid(const persimm_entry_layout *layout) {
@@ -130,19 +133,19 @@ bool persimm_hamt_layout_valid(const persimm_entry_layout *layout) {
 }
 
 static uint32_t persimm_hamt_hash_of(const persimm_hamt_t *hamt, const void *key) {
-    return hamt->hash(key, hamt->layout.key_size, hamt->ctx);
+    return hamt->hash(key, hamt->layout.key_size, hamt->key_ctx);
 }
 
 static bool persimm_hamt_keys_equal(const persimm_hamt_t *hamt, const void *key_a,
                                     const void *key_b) {
-    return hamt->equals(key_a, key_b, hamt->layout.key_size, hamt->ctx);
+    return hamt->equals(key_a, key_b, hamt->layout.key_size, hamt->key_ctx);
 }
 
 /* Entries */
 
 /*
- * An entry's key and value are separate elements as far as the host is
- * concerned, so each gets its own call. A set's entries have no value.
+ * An entry's key and value are managed separately. A set's entries have no
+ * value.
  */
 
 static void *persimm_hamt_value(const persimm_hamt_t *hamt, void *entry) {
@@ -154,16 +157,22 @@ static const void *persimm_hamt_value_const(const persimm_hamt_t *hamt, const vo
 }
 
 static void persimm_hamt_entry_retain(const persimm_hamt_t *hamt, void *entry) {
-    persimm_elem_retain(hamt->ops, hamt->ctx, entry);
+    if (NULL != hamt->key_ops && NULL != hamt->key_ops->retain) {
+        hamt->key_ops->retain(entry, hamt->key_ctx);
+    }
     if (hamt->layout.value_size > 0) {
-        persimm_elem_retain(hamt->ops, hamt->ctx, persimm_hamt_value(hamt, entry));
+        persimm_elem_retain(hamt->value_ops, hamt->value_ctx,
+                            persimm_hamt_value(hamt, entry));
     }
 }
 
 static void persimm_hamt_entry_release(const persimm_hamt_t *hamt, void *entry) {
-    persimm_elem_release(hamt->ops, hamt->ctx, entry);
+    if (NULL != hamt->key_ops && NULL != hamt->key_ops->release) {
+        hamt->key_ops->release(entry, hamt->key_ctx);
+    }
     if (hamt->layout.value_size > 0) {
-        persimm_elem_release(hamt->ops, hamt->ctx, persimm_hamt_value(hamt, entry));
+        persimm_elem_release(hamt->value_ops, hamt->value_ctx,
+                             persimm_hamt_value(hamt, entry));
     }
 }
 
@@ -285,9 +294,9 @@ static persimm_hamt_node_t *persimm_hamt_with_value(persimm_hamt_node_t *node, u
         void *slot = persimm_hamt_value(hamt, persimm_hamt_entry(node, index, entry_size));
         void *replacement = persimm_hamt_value(hamt, (void *)entry);
         if (replacement == slot) return node;
-        persimm_elem_release(hamt->ops, hamt->ctx, slot);
+        persimm_elem_release(hamt->value_ops, hamt->value_ctx, slot);
         memcpy(slot, replacement, value_size);
-        persimm_elem_retain(hamt->ops, hamt->ctx, slot);
+        persimm_elem_retain(hamt->value_ops, hamt->value_ctx, slot);
         return node;
     }
 
@@ -901,13 +910,19 @@ const void *persimm_hamt_next(persimm_hamt_node_t *root, const void *key,
 static void persimm_hamt_trace_visit(const void *slot, size_t index, void *ctx) {
     (void) index;
     const persimm_hamt_t *hamt = (const persimm_hamt_t *)ctx;
-    hamt->ops->trace(slot, hamt->ctx);
-    if (hamt->layout.value_size > 0) {
-        hamt->ops->trace(persimm_hamt_value_const(hamt, slot), hamt->ctx);
+    if (NULL != hamt->key_ops && NULL != hamt->key_ops->trace) {
+        hamt->key_ops->trace(slot, hamt->key_ctx);
+    }
+    if (hamt->layout.value_size > 0 && NULL != hamt->value_ops &&
+        NULL != hamt->value_ops->trace) {
+        hamt->value_ops->trace(persimm_hamt_value_const(hamt, slot), hamt->value_ctx);
     }
 }
 
 void persimm_hamt_trace(persimm_hamt_node_t *root, const persimm_hamt_t *hamt) {
-    if (NULL == hamt->ops || NULL == hamt->ops->trace) return;
+    bool traces_keys = NULL != hamt->key_ops && NULL != hamt->key_ops->trace;
+    bool traces_values = hamt->layout.value_size > 0 && NULL != hamt->value_ops &&
+                         NULL != hamt->value_ops->trace;
+    if (!traces_keys && !traces_values) return;
     persimm_hamt_foreach(root, hamt, persimm_hamt_trace_visit, (void *)hamt);
 }
