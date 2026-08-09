@@ -1687,29 +1687,6 @@ JANET_FN(cfun_persimm_to_array,
     janet_panicf("expected a persimmon collection, got %v", argv[0]);
 }
 
-static const JanetRegExt cfuns[] = {
-    JANET_REG("vec", cfun_persimm_vec),
-    JANET_REG("list", cfun_persimm_list),
-    JANET_REG("map", cfun_persimm_map),
-    JANET_REG("set", cfun_persimm_set),
-    JANET_REG("assoc", cfun_persimm_assoc),
-    JANET_REG("dissoc", cfun_persimm_dissoc),
-    JANET_REG("conj", cfun_persimm_conj),
-    JANET_REG("disj", cfun_persimm_disj),
-    JANET_REG("transient", cfun_persimm_transient),
-    JANET_REG("persistent!", cfun_persimm_persistent),
-    JANET_REG("conj!", cfun_persimm_conj_mut),
-    JANET_REG("assoc!", cfun_persimm_assoc_mut),
-    JANET_REG("dissoc!", cfun_persimm_dissoc_mut),
-    JANET_REG("disj!", cfun_persimm_disj_mut),
-    JANET_REG("has-key?", cfun_persimm_has_key),
-    JANET_REG("first", cfun_persimm_first),
-    JANET_REG("rest", cfun_persimm_rest),
-    JANET_REG("to-array", cfun_persimm_to_array),
-    JANET_REG("to-table", cfun_persimm_to_table),
-    JANET_REG_END
-};
-
 /* Environment Registration */
 
 void persimm_register_type(JanetTable *env) {
@@ -1723,7 +1700,35 @@ void persimm_register_type(JanetTable *env) {
     janet_register_abstract_type(&persimm_set_transient_type);
 }
 
+/* The table is a local rather than a file-scope static because JANET_REG
+ * initialises each entry's source line from a const variable emitted by
+ * JANET_FN. That is not a constant expression, so MSVC rejects it in an
+ * object with static storage duration. janet_cfuns_ext copies what it
+ * needs during the call, so the table need not outlive it. */
 void persimm_register_functions(JanetTable *env) {
+    JanetRegExt cfuns[] = {
+        JANET_REG("vec", cfun_persimm_vec),
+        JANET_REG("list", cfun_persimm_list),
+        JANET_REG("map", cfun_persimm_map),
+        JANET_REG("set", cfun_persimm_set),
+        JANET_REG("assoc", cfun_persimm_assoc),
+        JANET_REG("dissoc", cfun_persimm_dissoc),
+        JANET_REG("conj", cfun_persimm_conj),
+        JANET_REG("disj", cfun_persimm_disj),
+        JANET_REG("transient", cfun_persimm_transient),
+        JANET_REG("persistent!", cfun_persimm_persistent),
+        JANET_REG("conj!", cfun_persimm_conj_mut),
+        JANET_REG("assoc!", cfun_persimm_assoc_mut),
+        JANET_REG("dissoc!", cfun_persimm_dissoc_mut),
+        JANET_REG("disj!", cfun_persimm_disj_mut),
+        JANET_REG("has-key?", cfun_persimm_has_key),
+        JANET_REG("first", cfun_persimm_first),
+        JANET_REG("rest", cfun_persimm_rest),
+        JANET_REG("to-array", cfun_persimm_to_array),
+        JANET_REG("to-table", cfun_persimm_to_table),
+        JANET_REG_END
+    };
+
     janet_cfuns_ext(env, "persimmon", cfuns);
 }
 
