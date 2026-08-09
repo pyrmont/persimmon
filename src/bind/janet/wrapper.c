@@ -82,9 +82,9 @@ static int64_t janet_persimm_integer(Janet input) {
     return value;
 }
 
-/* Construction owns its unpublished value outright. Moving it through a
- * transient keeps that fast path out of the persistent API without leaving a
- * half-built value invisible to Janet's collector between unmarshalled items. */
+/* Unmarshalling moves its unpublished value through a transient one item at a
+ * time. Persisting after each item keeps everything already read visible to
+ * Janet's collector while the next item is decoded. */
 static persimm_status janet_persimm_vector_build_push(persimm_vector_t *vector,
                                                       const void *elem) {
     persimm_vector_transient_t transient;
@@ -1198,9 +1198,20 @@ static Janet cfun_persimm_vec(int32_t argc, Janet *argv) {
     if (1 == argc) {
         JanetView view;
         janet_persimm_view(argv[0], &view);
+
+        /* Every value remains reachable through argv[0], so construction can
+           keep one transient for the whole batch. */
+        persimm_vector_transient_t transient;
+        persimm_vector_to_transient(vector, &transient);
+        persimm_vector_deinit(vector);
         for (int32_t i = 0; i < view.len; i++) {
-            janet_persimm_check(janet_persimm_vector_build_push(vector, &view.items[i]));
+            persimm_status status = persimm_vector_transient_push(&transient, &view.items[i]);
+            if (PERSIMM_OK != status) {
+                persimm_vector_transient_deinit(&transient);
+                janet_panic(persimm_status_string(status));
+            }
         }
+        janet_persimm_check(persimm_vector_transient_persist(&transient, vector));
     }
 
     return janet_wrap_abstract(vector);
@@ -1236,13 +1247,21 @@ static Janet cfun_persimm_map(int32_t argc, Janet *argv) {
         if (!janet_dictionary_view(argv[0], &kvs, &len, &cap)) {
             janet_panicf("expected a table or struct, got %v", argv[0]);
         }
+        persimm_map_transient_t transient;
+        persimm_map_to_transient(map, &transient);
+        persimm_map_deinit(map);
         for (int32_t i = 0; i < cap; i++) {
             /* An unused slot carries a nil key, and a nil value is no entry. */
             if (janet_checktype(kvs[i].key, JANET_NIL)) continue;
             if (janet_checktype(kvs[i].value, JANET_NIL)) continue;
             janet_persimm_entry_t entry = { kvs[i].key, kvs[i].value };
-            janet_persimm_check(janet_persimm_map_build_assoc(map, &entry));
+            persimm_status status = persimm_map_transient_assoc(&transient, &entry);
+            if (PERSIMM_OK != status) {
+                persimm_map_transient_deinit(&transient);
+                janet_panic(persimm_status_string(status));
+            }
         }
+        janet_persimm_check(persimm_map_transient_persist(&transient, map));
     }
 
     return janet_wrap_abstract(map);
@@ -1258,8 +1277,19 @@ static Janet cfun_persimm_set(int32_t argc, Janet *argv) {
         janet_persimm_view(argv[0], &view);
         for (int32_t i = 0; i < view.len; i++) {
             janet_persimm_check_key(view.items[i]);
-            janet_persimm_check(janet_persimm_set_build_conj(set, &view.items[i]));
         }
+
+        persimm_set_transient_t transient;
+        persimm_set_to_transient(set, &transient);
+        persimm_set_deinit(set);
+        for (int32_t i = 0; i < view.len; i++) {
+            persimm_status status = persimm_set_transient_conj(&transient, &view.items[i]);
+            if (PERSIMM_OK != status) {
+                persimm_set_transient_deinit(&transient);
+                janet_panic(persimm_status_string(status));
+            }
+        }
+        janet_persimm_check(persimm_set_transient_persist(&transient, set));
     }
 
     return janet_wrap_abstract(set);

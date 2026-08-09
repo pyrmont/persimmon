@@ -30,6 +30,14 @@
         (persimmon/conj! transient i))
       (persimmon/persistent! transient))))
 
+(def vector-seed @[])
+(for i 0 vector-count
+  (array/push vector-seed i))
+
+(def seeded-vector
+  (report "vector seeded constructor" vector-count
+    (fn [] (persimmon/vec vector-seed))))
+
 (def map-count 50000)
 
 (def persistent-map
@@ -47,6 +55,14 @@
       (for i 0 map-count
         (persimmon/assoc! transient i (* i 3)))
       (persimmon/persistent! transient))))
+
+(def map-seed @{})
+(for i 0 map-count
+  (put map-seed i (* i 3)))
+
+(def seeded-map
+  (report "map seeded constructor" map-count
+    (fn [] (persimmon/map map-seed))))
 
 (def set-count 50000)
 
@@ -66,10 +82,19 @@
         (persimmon/conj! transient i))
       (persimmon/persistent! transient))))
 
+(def set-seed (array/slice vector-seed 0 set-count))
+
+(def seeded-set
+  (report "set seeded constructor" set-count
+    (fn [] (persimmon/set set-seed))))
+
 (print "checksum: "
        (+ (length persistent-vector)
           (length transient-vector)
+          (length seeded-vector)
           (length persistent-map)
           (length transient-map)
+          (length seeded-map)
           (length persistent-set)
-          (length transient-set)))
+          (length transient-set)
+          (length seeded-set)))
