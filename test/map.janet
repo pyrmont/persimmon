@@ -1,0 +1,276 @@
+(use ../deps/testament)
+
+(import ../_build/release/persimmon :as persimmon)
+
+
+(defn- pairings
+  "Builds a table mapping the integers from 0 to `n`, exclusive, to their doubles"
+  [n]
+  (def result @{})
+  (for i 0 n (put result i (* 2 i)))
+  result)
+
+
+(defn- entries
+  "Returns a map's pairs in a settled order, whatever order it holds them in"
+  [m]
+  (sorted (persimmon/to-array m)))
+
+
+# A map is a trie taking five bits of a key's hash at each level, so it gains a
+# level roughly every 32 entries. The sizes below sit either side of the first
+# few of those boundaries.
+
+
+(deftest map-with-no-entries
+  (is (= 0 (length (persimmon/map))))
+  (is (== @{} (persimmon/to-table (persimmon/map)))))
+
+
+(deftest map-with-one-entry
+  (def m (persimmon/map {:a 1}))
+  (is (= 1 (length m)))
+  (is (= 1 (get m :a)))
+  (is (= nil (get m :b))))
+
+
+(deftest map-from-a-table
+  (def m (persimmon/map @{:a 1 :b 2}))
+  (is (= 2 (length m)))
+  (is (= 1 (get m :a)))
+  (is (= 2 (get m :b))))
+
+
+(deftest map-drops-entries-with-a-nil-value
+  (def m (persimmon/map @{:a 1 :b nil}))
+  (is (= 1 (length m)))
+  (is (= nil (get m :b))))
+
+
+(deftest map-with-entries-across-multiple-levels
+  (def expect (pairings 1100))
+  (def m (persimmon/map expect))
+  (is (= 1100 (length m)))
+  (is (= 0 (get m 0)))
+  (is (= 62 (get m 31)))
+  (is (= 64 (get m 32)))
+  (is (= 2198 (get m 1099)))
+  (is (= nil (get m 1100)))
+  (is (== expect (persimmon/to-table m))))
+
+
+(deftest map-refuses-a-nil-key
+  (is (thrown? (persimmon/assoc (persimmon/map) nil 1))))
+
+
+(deftest map-refuses-a-collection-it-cannot-read
+  (is (thrown? (persimmon/map [:a 1]))))
+
+
+# `length` reads the abstract type's length slot while `:length` goes through
+# the method table. Both are supported and must agree.
+(deftest length-of-a-map
+  (is (= 0 (length (persimmon/map))))
+  (is (= 0 (:length (persimmon/map))))
+  (def m (persimmon/map (pairings 1100)))
+  (is (= 1100 (length m)))
+  (is (= 1100 (:length m))))
+
+
+# A map may hold the very keywords the method table answers to, so a key it
+# holds is looked up before any method of the same name.
+(deftest get-prefers-a-key-over-a-method
+  (is (= 99 (get (persimmon/map {:length 99}) :length)))
+  (is (= 1 (:length (persimmon/map {:a 1})))))
+
+
+(deftest get-with-a-missing-key
+  (def m (persimmon/map {:a 1}))
+  (is (= nil (get m :b)))
+  (is (= nil (get m nil)))
+  (is (= :fallback (get m :b :fallback))))
+
+
+(deftest assoc-with-a-new-key
+  (def m1 (persimmon/map {:a 1}))
+  (def m2 (persimmon/assoc m1 :b 2))
+  (is (= 1 (length m1)))
+  (is (= 2 (length m2)))
+  (is (= nil (get m1 :b)))
+  (is (= 2 (get m2 :b))))
+
+
+(deftest assoc-with-an-existing-key
+  (def m1 (persimmon/map {:a 1 :b 2}))
+  (def m2 (persimmon/assoc m1 :a 99))
+  (is (= 2 (length m2)))
+  (is (= 1 (get m1 :a)))
+  (is (= 99 (get m2 :a)))
+  (is (= 2 (get m2 :b))))
+
+
+# A nil value is no value, as it is for a Janet table.
+(deftest assoc-with-a-nil-value-removes-the-key
+  (def m1 (persimmon/map {:a 1 :b 2}))
+  (def m2 (persimmon/assoc m1 :a nil))
+  (is (= 1 (length m2)))
+  (is (= nil (get m2 :a)))
+  (is (= false (persimmon/has-key? m2 :a)))
+  (is (= 1 (get m1 :a))))
+
+
+(deftest assoc-across-multiple-levels
+  (var m (persimmon/map))
+  (for i 0 1100
+    (set m (persimmon/assoc m i (* 2 i))))
+  (is (= 1100 (length m)))
+  (is (== (pairings 1100) (persimmon/to-table m))))
+
+
+(deftest dissoc-with-an-existing-key
+  (def m1 (persimmon/map {:a 1 :b 2}))
+  (def m2 (persimmon/dissoc m1 :a))
+  (is (= 2 (length m1)))
+  (is (= 1 (length m2)))
+  (is (= 1 (get m1 :a)))
+  (is (= nil (get m2 :a)))
+  (is (= 2 (get m2 :b))))
+
+
+(deftest dissoc-with-a-missing-key
+  (def m1 (persimmon/map {:a 1}))
+  (def m2 (persimmon/dissoc m1 :b))
+  (is (= 1 (length m2)))
+  (is (= 1 (get m2 :a))))
+
+
+(deftest dissoc-back-to-empty
+  (var m (persimmon/map (pairings 1100)))
+  (for i 0 1100
+    (set m (persimmon/dissoc m i)))
+  (is (= 0 (length m)))
+  (is (== @{} (persimmon/to-table m))))
+
+
+(deftest dissoc-leaves-the-remaining-entries-reachable
+  (var m (persimmon/map (pairings 1100)))
+  (for i 0 1100
+    (when (even? i) (set m (persimmon/dissoc m i))))
+  (is (= 550 (length m)))
+  (for i 0 1100
+    (if (even? i)
+      (is (= nil (get m i)))
+      (is (= (* 2 i) (get m i))))))
+
+
+(deftest has-key?-with-a-map
+  (def m (persimmon/map {:a 1}))
+  (is (= true (persimmon/has-key? m :a)))
+  (is (= false (persimmon/has-key? m :b)))
+  (is (= false (persimmon/has-key? m nil))))
+
+
+(deftest next-with-an-empty-map
+  (is (= nil (next (persimmon/map)))))
+
+
+(deftest next-with-a-missing-key
+  (is (= nil (next (persimmon/map {:a 1}) :absent))))
+
+
+# Janet builds `keys`, `values`, `pairs` and `each` out of `next` and `get`,
+# so all of them ride on the map answering those two.
+(deftest iterating-a-map
+  (def m (persimmon/map {:a 1 :b 2 :c 3}))
+  (is (== @[:a :b :c] (sorted (keys m))))
+  (is (== @[1 2 3] (sorted (values m))))
+  (is (== @[[:a 1] [:b 2] [:c 3]] (sorted (pairs m))))
+  (is (== @[1 2 3] (sorted (seq [v :in m] v)))))
+
+
+(deftest iterating-a-map-across-multiple-levels
+  (def m (persimmon/map (pairings 1100)))
+  (is (= 1100 (length (keys m))))
+  (is (== (sorted (keys (pairings 1100))) (sorted (keys m)))))
+
+
+# Two maps holding the same entries agree on the order they hand them over,
+# however each of them was built.
+(deftest iteration-order-does-not-depend-on-how-a-map-was-built
+  (def direct (persimmon/map (pairings 100)))
+  (var grown (persimmon/map))
+  (for i 0 100
+    (set grown (persimmon/assoc grown i (* 2 i))))
+  (var pruned (persimmon/map (pairings 200)))
+  (for i 100 200
+    (set pruned (persimmon/dissoc pruned i)))
+  (is (== (keys direct) (keys grown)))
+  (is (== (keys direct) (keys pruned))))
+
+
+(deftest to-array-with-a-map
+  (def m (persimmon/map {:a 1 :b 2}))
+  (is (== @[[:a 1] [:b 2]] (entries m))))
+
+
+(deftest to-table-with-a-map
+  (is (== @{:a 1 :b 2} (persimmon/to-table (persimmon/map {:a 1 :b 2})))))
+
+
+(deftest stringifying-a-map
+  (is (= "{}" (string (persimmon/map))))
+  (is (= "{a 1}" (string (persimmon/map {:a 1})))))
+
+
+(deftest hashing-with-equivalent-maps
+  (def h1 (hash (persimmon/map {:a 1 :b 2})))
+  (def h2 (hash (persimmon/map {:b 2 :a 1})))
+  (is (= h1 h2)))
+
+
+# A map's hash cannot lean on the order its entries arrive in, because two
+# equal maps need not agree on that order when keys share a hash.
+(deftest hashing-does-not-depend-on-how-a-map-was-built
+  (def direct (persimmon/map (pairings 100)))
+  (var grown (persimmon/map))
+  (for i 0 100
+    (set grown (persimmon/assoc grown i (* 2 i))))
+  (is (= (hash direct) (hash grown))))
+
+
+(deftest hashing-with-different-maps
+  (def h1 (hash (persimmon/map {:a 1})))
+  (def h2 (hash (persimmon/map {:a 2})))
+  (is (not (= h1 h2))))
+
+
+(deftest keys-of-every-type
+  (def m (persimmon/map {:kw 1 "str" 2 'sym 3 42 4 true 5 [1 2] 6}))
+  (is (= 6 (length m)))
+  (is (= 1 (get m :kw)))
+  (is (= 2 (get m "str")))
+  (is (= 3 (get m 'sym)))
+  (is (= 4 (get m 42)))
+  (is (= 5 (get m true)))
+  (is (= 6 (get m [1 2]))))
+
+
+# The collector reaches a map's keys and values only through its mark
+# callback, so anything it misses is freed while the map still holds it.
+(deftest a-map-survives-a-collection
+  (def m (persimmon/map (pairings 1100)))
+  (gccollect)
+  (is (= 1100 (length m)))
+  (is (== (pairings 1100) (persimmon/to-table m))))
+
+
+(deftest a-shared-map-survives-its-original
+  (var m1 (persimmon/map (pairings 1100)))
+  (def m2 (persimmon/assoc m1 2000 1))
+  (set m1 nil)
+  (gccollect)
+  (is (= 1101 (length m2)))
+  (is (= 2198 (get m2 1099))))
+
+
+(run-tests!)

@@ -54,10 +54,46 @@ typedef struct {
 
 typedef void (*persimm_visit_fn)(void *slot, size_t index, void *ctx);
 
+/* Entries */
+
+/*
+ * A map's elements are entries: a key followed by a value. The host lays the
+ * entry out and describes it here rather than letting the core compute it,
+ * because a core that placed the value itself would have to pad the key to
+ * max_align_t. On a target where that is 16 bytes and a key is 8, every entry
+ * would then cost twice what the host's own struct costs.
+ *
+ * The key occupies the first `key_size` bytes, so a pointer to an entry is
+ * also a pointer to its key. `value_size` is zero for a set, whose entries are
+ * keys and nothing more.
+ */
+typedef struct {
+    size_t entry_size;   // the stride from one entry to the next
+    size_t key_size;     // the key occupies the first key_size bytes
+    size_t value_offset; // where the value begins, ignored when value_size is 0
+    size_t value_size;
+} persimm_entry_layout;
+
+/*
+ * Keys are hashed and compared through this table. Either callback may be
+ * NULL, as may the whole table, in which case keys are hashed as bytes with
+ * FNV-1a and compared with memcmp.
+ *
+ * The two must agree: keys that compare equal have to hash equally, or a
+ * lookup will miss an entry the map holds. Note that the byte defaults do not
+ * agree for a key type with padding bytes or several representations of one
+ * value, which is why a host with such keys must supply both.
+ */
+typedef struct {
+    uint32_t (*hash)(const void *key, size_t key_size, void *ctx);
+    bool (*equals)(const void *key_a, const void *key_b, size_t key_size, void *ctx);
+} persimm_key_ops;
+
 /* Types */
 
-typedef struct persimm_node persimm_node_t;
-typedef struct persimm_cell persimm_cell_t;
+typedef struct persimm_vector_node persimm_vector_node_t;
+typedef struct persimm_list_cell persimm_list_cell_t;
+typedef struct persimm_hamt_node persimm_hamt_node_t;
 
 /*
  * In each structure below, fields are readable by the host (`count` in
@@ -75,8 +111,8 @@ typedef struct {
     size_t elem_size;
     const persimm_elem_ops *ops;
     void *ctx;
-    persimm_node_t *root;
-    persimm_node_t *tail;
+    persimm_vector_node_t *root;
+    persimm_vector_node_t *tail;
 } persimm_vector_t;
 
 /*
@@ -88,7 +124,7 @@ typedef struct {
     size_t elem_size;
     const persimm_elem_ops *ops;
     void *ctx;
-    persimm_cell_t *head;
+    persimm_list_cell_t *head;
 } persimm_list_t;
 
 /*
@@ -108,8 +144,40 @@ typedef struct {
     const persimm_list_t *list;
     size_t count;
     size_t index;
-    persimm_cell_t *cell;
+    persimm_list_cell_t *cell;
 } persimm_list_cursor_t;
+
+/*
+ * A CHAMP trie, which is a hash array mapped trie whose nodes carry one bitmap
+ * for the slots holding an entry and another for the slots holding a child.
+ * Looking a key up, storing one and dropping one are all effectively constant
+ * time.
+ *
+ * A trie is kept in canonical form, so two maps holding the same entries have
+ * the same shape however they were built, and therefore iterate in the same
+ * order and hash alike.
+ */
+typedef struct {
+    size_t count;
+    persimm_entry_layout layout;
+    const persimm_elem_ops *ops;
+    const persimm_key_ops *key_ops;
+    void *ctx;
+    persimm_hamt_node_t *root;
+} persimm_map_t;
+
+/*
+ * The same trie over entries that are keys and nothing else. A set is to a map
+ * what a map with no values would be, and shares its whole implementation.
+ */
+typedef struct {
+    size_t count;
+    persimm_entry_layout layout;
+    const persimm_elem_ops *ops;
+    const persimm_key_ops *key_ops;
+    void *ctx;
+    persimm_hamt_node_t *root;
+} persimm_set_t;
 
 /* Reference Counting */
 
@@ -253,5 +321,121 @@ void persimm_list_foreach(const persimm_list_t *list, persimm_visit_fn fn, void 
  * Calls the element table's `trace` callback for every element.
  */
 void persimm_list_trace(const persimm_list_t *list);
+
+/* Maps */
+
+/*
+ * Prepares an empty map for use. `layout` is copied and must describe an entry
+ * whose key starts at offset zero and whose value lies within it; `ops`,
+ * `key_ops` and `ctx` may be NULL. Nothing is allocated until the first entry
+ * is stored.
+ */
+persimm_status persimm_map_init(persimm_map_t *map, const persimm_entry_layout *layout,
+                                const persimm_elem_ops *ops, const persimm_key_ops *key_ops,
+                                void *ctx);
+
+/*
+ * Points `dest` at the same trie as `src`, sharing its nodes. `dest` need not
+ * be initialised and must not be already, or its nodes will leak.
+ */
+void persimm_map_clone(const persimm_map_t *src, persimm_map_t *dest);
+
+void persimm_map_deinit(persimm_map_t *map);
+
+/*
+ * Returns a pointer to the storage for `key`'s value, or NULL when the map
+ * does not hold the key. As with a vector, the pointer does not survive a
+ * later operation on any map sharing that node.
+ *
+ * A map whose entries have no value has nothing to return, so ask
+ * persimm_map_has instead.
+ */
+void *persimm_map_ref(const persimm_map_t *map, const void *key);
+
+/*
+ * Returns the whole entry rather than its value, which is what a host wants
+ * when it needs the key the map actually holds rather than the one it looked
+ * up with. Storing a key that already has an equal counterpart leaves the
+ * earlier one in place.
+ */
+void *persimm_map_ref_entry(const persimm_map_t *map, const void *key);
+
+bool persimm_map_has(const persimm_map_t *map, const void *key);
+
+/*
+ * Stores `entry`, which the host lays out as its `layout` describes. Where the
+ * key is already present only the value is replaced, and the key already
+ * stored stays. `immutable` carries the same meaning as for a vector: when it
+ * is false a node no other map shares may be written in place.
+ *
+ * On failure the map is unchanged and remains safe to deinitialise.
+ */
+persimm_status persimm_map_assoc(persimm_map_t *map, const void *entry, bool immutable);
+
+/*
+ * Drops `key` and its value, releasing both. A key the map does not hold is
+ * not an error and leaves the map alone.
+ */
+persimm_status persimm_map_dissoc(persimm_map_t *map, const void *key, bool immutable);
+
+/*
+ * Walks the trie once, calling `fn` with each entry. The order is not the
+ * order entries were stored in, but it is the order persimm_map_next follows,
+ * and two maps holding the same keys agree on it however they were built.
+ *
+ * Keys whose hashes are equal in all 32 bits are the exception: they sit in
+ * the order they arrived, and no order exists to sort opaque keys into. A host
+ * deriving a hash from a whole map should combine its entries commutatively so
+ * that equal maps still agree.
+ */
+void persimm_map_foreach(const persimm_map_t *map, persimm_visit_fn fn, void *ctx);
+
+/*
+ * Returns the entry following `key`'s, the first entry when `key` is NULL, or
+ * NULL at the end. Nothing is kept between calls, so a map shared in several
+ * places can be walked from each of them at once.
+ */
+void *persimm_map_next(const persimm_map_t *map, const void *key);
+
+/*
+ * Calls the element table's `trace` callback for every key and every value.
+ */
+void persimm_map_trace(const persimm_map_t *map);
+
+/* Sets */
+
+/*
+ * Prepares an empty set for use. `elem_size` must be non-zero; `ops`,
+ * `key_ops` and `ctx` may be NULL.
+ */
+persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size, const persimm_elem_ops *ops,
+                                const persimm_key_ops *key_ops, void *ctx);
+
+void persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest);
+
+void persimm_set_deinit(persimm_set_t *set);
+
+/*
+ * Returns a pointer to the element the set holds, or NULL. This is the element
+ * stored rather than the one looked up with, which is what a host interning
+ * values through a set is after.
+ */
+void *persimm_set_ref(const persimm_set_t *set, const void *elem);
+
+bool persimm_set_has(const persimm_set_t *set, const void *elem);
+
+/*
+ * Adds `elem`, retaining it. An element the set already holds leaves it
+ * untouched, so the first of a run of equal elements is the one kept.
+ */
+persimm_status persimm_set_conj(persimm_set_t *set, const void *elem, bool immutable);
+
+persimm_status persimm_set_disj(persimm_set_t *set, const void *elem, bool immutable);
+
+void persimm_set_foreach(const persimm_set_t *set, persimm_visit_fn fn, void *ctx);
+
+void *persimm_set_next(const persimm_set_t *set, const void *elem);
+
+void persimm_set_trace(const persimm_set_t *set);
 
 #endif /* end of include guard */

@@ -80,6 +80,43 @@ typedef union {
     void *as_pointer;
 } persimm_align_t;
 
+/*
+ * C99 has no _Alignof, so the alignment is recovered from where a member lands
+ * after a single char. A HAMT node holds entries and child pointers in one
+ * allocation and rounds the boundary between them up to this.
+ */
+typedef struct {
+    char pad;
+    persimm_align_t value;
+} persimm_align_probe_t;
+
+#define PERSIMM_ALIGNMENT (offsetof(persimm_align_probe_t, value))
+#define PERSIMM_ALIGN_UP(n) (((n) + PERSIMM_ALIGNMENT - 1) & ~(PERSIMM_ALIGNMENT - 1))
+
+/* Bit Counting */
+
+/*
+ * A HAMT node turns a bitmap into an array index by counting the bits below
+ * the one it is looking at, so this sits on the hot path of every lookup.
+ */
+
+#if defined(__GNUC__) || defined(__clang__)
+
+#define PERSIMM_POPCOUNT(x) ((uint32_t)__builtin_popcount((unsigned int)(x)))
+
+#else
+
+static inline uint32_t persimm_popcount(uint32_t x) {
+    x = x - ((x >> 1) & 0x55555555u);
+    x = (x & 0x33333333u) + ((x >> 2) & 0x33333333u);
+    x = (x + (x >> 4)) & 0x0f0f0f0fu;
+    return (x * 0x01010101u) >> 24;
+}
+
+#define PERSIMM_POPCOUNT(x) persimm_popcount(x)
+
+#endif
+
 /* Elements */
 
 static inline void persimm_elem_retain(const persimm_elem_ops *ops, void *ctx, void *slot) {
@@ -89,5 +126,73 @@ static inline void persimm_elem_retain(const persimm_elem_ops *ops, void *ctx, v
 static inline void persimm_elem_release(const persimm_elem_ops *ops, void *ctx, void *slot) {
     if (NULL != ops && NULL != ops->release) ops->release(slot, ctx);
 }
+
+/* Hash Array Mapped Tries */
+
+/*
+ * The CHAMP trie behind both the map and the set, implemented in
+ * persimmon_hamt.c. A set is a trie whose layout gives entries no value, so
+ * neither public face needs any part of this beyond passing it along.
+ *
+ * Everything here works on a root pointer rather than a structure, which is
+ * what lets persimm_map_t and persimm_set_t stay distinct types over one
+ * implementation without either of them casting to the other.
+ */
+typedef struct {
+    persimm_entry_layout layout;
+    const persimm_elem_ops *ops;
+    uint32_t (*hash)(const void *key, size_t key_size, void *ctx);
+    bool (*equals)(const void *key_a, const void *key_b, size_t key_size, void *ctx);
+    void *ctx;
+} persimm_hamt_t;
+
+/*
+ * Resolves `key_ops` against the byte defaults once, so that no lookup has to
+ * test for a NULL callback on its way down the trie.
+ */
+void persimm_hamt_config(persimm_hamt_t *hamt, const persimm_entry_layout *layout,
+                         const persimm_elem_ops *ops, const persimm_key_ops *key_ops, void *ctx);
+
+bool persimm_hamt_layout_valid(const persimm_entry_layout *layout);
+
+void persimm_hamt_retain(persimm_hamt_node_t *root);
+
+void persimm_hamt_release(persimm_hamt_node_t *root, const persimm_hamt_t *hamt);
+
+/*
+ * Returns the entry whose key matches, or NULL. The key is the first
+ * `key_size` bytes of an entry, so the result is also a pointer to the stored
+ * key, and the value sits `value_offset` bytes further along.
+ */
+void *persimm_hamt_ref(persimm_hamt_node_t *root, const void *key, const persimm_hamt_t *hamt);
+
+/*
+ * Stores `entry`, replacing only the value when the key is already present so
+ * that the key first stored is the key the trie keeps. `*added` reports
+ * whether the entry count grew. On failure `*root` is left as it was.
+ */
+persimm_status persimm_hamt_assoc(persimm_hamt_node_t **root, const void *entry,
+                                  const persimm_hamt_t *hamt, bool immutable, bool *added);
+
+persimm_status persimm_hamt_dissoc(persimm_hamt_node_t **root, const void *key,
+                                   const persimm_hamt_t *hamt, bool immutable, bool *removed);
+
+/*
+ * Walks the trie once, calling `fn` with each entry. persimm_hamt_next follows
+ * the same order, so a host may drive iteration either way and see the same
+ * sequence.
+ */
+void persimm_hamt_foreach(persimm_hamt_node_t *root, const persimm_hamt_t *hamt,
+                          persimm_visit_fn fn, void *ctx);
+
+/*
+ * Returns the entry after the one `key` belongs to, the first entry when `key`
+ * is NULL, or NULL at the end. This descends by hash rather than resuming from
+ * a cursor, so it costs the depth of the trie and needs nothing kept between
+ * calls, which is what lets a shared trie be iterated from several places.
+ */
+void *persimm_hamt_next(persimm_hamt_node_t *root, const void *key, const persimm_hamt_t *hamt);
+
+void persimm_hamt_trace(persimm_hamt_node_t *root, const persimm_hamt_t *hamt);
 
 #endif /* end of include guard */

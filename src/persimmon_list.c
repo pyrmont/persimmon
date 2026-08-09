@@ -10,15 +10,15 @@
 
 /* Types */
 
-struct persimm_cell {
+struct persimm_list_cell {
     persimm_refcount_t ref_count;
-    persimm_cell_t *next;
+    persimm_list_cell_t *next;
     persimm_align_t data[];
 };
 
 /* Element Access */
 
-static void *persimm_cell_slot(persimm_cell_t *cell) {
+static void *persimm_list_cell_slot(persimm_list_cell_t *cell) {
     return (void *)cell->data;
 }
 
@@ -29,27 +29,28 @@ static void *persimm_cell_slot(persimm_cell_t *cell) {
  * host cares to make it, and a release that recursed would run out of stack
  * long before the list ran out of cells.
  */
-static void persimm_cell_release(persimm_cell_t *cell, const persimm_elem_ops *ops, void *ctx) {
+static void persimm_list_cell_release(persimm_list_cell_t *cell, const persimm_elem_ops *ops,
+                                      void *ctx) {
     while (NULL != cell) {
         if (PERSIMM_RC_DEC(cell->ref_count) > 1) return;
 
-        persimm_cell_t *next = cell->next;
-        persimm_elem_release(ops, ctx, persimm_cell_slot(cell));
+        persimm_list_cell_t *next = cell->next;
+        persimm_elem_release(ops, ctx, persimm_list_cell_slot(cell));
         free(cell);
         cell = next;
     }
 }
 
 void persimm_list_deinit(persimm_list_t *list) {
-    persimm_cell_release(list->head, list->ops, list->ctx);
+    persimm_list_cell_release(list->head, list->ops, list->ctx);
     list->head = NULL;
     list->count = 0;
 }
 
 /* Initialising */
 
-static persimm_cell_t *persimm_cell_new(size_t elem_size) {
-    persimm_cell_t *cell = calloc(1, offsetof(struct persimm_cell, data) + elem_size);
+static persimm_list_cell_t *persimm_list_cell_new(size_t elem_size) {
+    persimm_list_cell_t *cell = calloc(1, offsetof(struct persimm_list_cell, data) + elem_size);
     if (NULL == cell) return NULL;
     PERSIMM_RC_SET(cell->ref_count, 1);
     return cell;
@@ -81,20 +82,20 @@ void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest) {
 
 void *persimm_list_first(const persimm_list_t *list) {
     if (NULL == list->head) return NULL;
-    return persimm_cell_slot(list->head);
+    return persimm_list_cell_slot(list->head);
 }
 
 void *persimm_list_ref(const persimm_list_t *list, size_t index) {
     if (index >= list->count) return NULL;
 
-    persimm_cell_t *cell = list->head;
+    persimm_list_cell_t *cell = list->head;
     for (size_t i = 0; i < index; i++) {
         if (NULL == cell) return NULL;
         cell = cell->next;
     }
     if (NULL == cell) return NULL;
 
-    return persimm_cell_slot(cell);
+    return persimm_list_cell_slot(cell);
 }
 
 void persimm_list_cursor_reset(persimm_list_cursor_t *cursor) {
@@ -108,7 +109,7 @@ void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *c
                             size_t index) {
     if (index >= list->count) return NULL;
 
-    persimm_cell_t *cell = list->head;
+    persimm_list_cell_t *cell = list->head;
     size_t position = 0;
 
     /* The count is part of the test so that a cursor kept across a change to
@@ -132,7 +133,7 @@ void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *c
     cursor->index = index;
     cursor->cell = cell;
 
-    return persimm_cell_slot(cell);
+    return persimm_list_cell_slot(cell);
 }
 
 bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index) {
@@ -145,11 +146,11 @@ bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index
 /* Inserting */
 
 persimm_status persimm_list_cons(persimm_list_t *list, const void *elem) {
-    persimm_cell_t *cell = persimm_cell_new(list->elem_size);
+    persimm_list_cell_t *cell = persimm_list_cell_new(list->elem_size);
     if (NULL == cell) return PERSIMM_ERR_ALLOC;
 
-    memcpy(persimm_cell_slot(cell), elem, list->elem_size);
-    persimm_elem_retain(list->ops, list->ctx, persimm_cell_slot(cell));
+    memcpy(persimm_list_cell_slot(cell), elem, list->elem_size);
+    persimm_elem_retain(list->ops, list->ctx, persimm_list_cell_slot(cell));
 
     /* The list's reference to its old head becomes the new cell's. */
     cell->next = list->head;
@@ -164,13 +165,13 @@ persimm_status persimm_list_cons(persimm_list_t *list, const void *elem) {
 persimm_status persimm_list_rest(persimm_list_t *list) {
     if (NULL == list->head) return PERSIMM_ERR_BOUNDS;
 
-    persimm_cell_t *head = list->head;
-    persimm_cell_t *next = head->next;
+    persimm_list_cell_t *head = list->head;
+    persimm_list_cell_t *next = head->next;
 
     /* Take a reference to the new head before letting go of the old one, or
        releasing the old head could take the rest of the chain with it. */
     if (NULL != next) PERSIMM_RC_INC(next->ref_count);
-    persimm_cell_release(head, list->ops, list->ctx);
+    persimm_list_cell_release(head, list->ops, list->ctx);
 
     list->head = next;
     list->count--;
@@ -182,8 +183,8 @@ persimm_status persimm_list_rest(persimm_list_t *list) {
 
 void persimm_list_foreach(const persimm_list_t *list, persimm_visit_fn fn, void *ctx) {
     size_t index = 0;
-    for (persimm_cell_t *cell = list->head; NULL != cell; cell = cell->next) {
-        fn(persimm_cell_slot(cell), index, ctx);
+    for (persimm_list_cell_t *cell = list->head; NULL != cell; cell = cell->next) {
+        fn(persimm_list_cell_slot(cell), index, ctx);
         index++;
     }
 }

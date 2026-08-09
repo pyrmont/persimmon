@@ -18,6 +18,8 @@ internal representation as they can.
 | --------- | ------------------------------------- | --------------------- |
 | Vector    | 32-way bit-partitioned trie with tail | index, append         |
 | List      | Singly linked chain of cells          | first, rest, prepend  |
+| Map       | 32-way CHAMP hash array mapped trie   | lookup, store, remove |
+| Set       | The same trie over keys alone         | lookup, add, remove   |
 
 The vector is a trie of the kind Clojure popularised: 32 items to a node,
 with a tail buffer so that repeated appends usually touch nothing but the
@@ -29,6 +31,22 @@ Indexing a list is linear, as it is in Clojure. Iterating one is not: each
 list keeps a cursor that lets a read resume from where the last one stopped,
 so walking a list front to back costs one step per element. An index behind
 the cursor, or into a different list, simply starts again from the head.
+
+The map is a CHAMP trie rather than the shape Clojure uses. Five bits of a
+key's hash choose a slot at each level, and a node carries two bitmaps: one
+for the slots holding an entry and one for the slots holding a child.
+Clojure tells those apart with a null in the key half of a pair, which is not
+open to a core whose keys are opaque bytes.
+
+The second bitmap also keeps a trie in canonical form, so two maps holding
+the same keys have the same shape however they were built. They therefore
+iterate in the same order, and a map that reached its contents by adding and
+removing entries is indistinguishable from one handed them outright. Keys
+whose hashes agree in all 32 bits are the exception: they share a collision
+node and sit in the order they arrived.
+
+A set is the same trie over entries that are keys and nothing else, so the
+two share their whole implementation.
 
 ## Structure
 
@@ -90,24 +108,61 @@ Add the dependency to your `info.jdn` file:
                     # -> :foo
 (persimmon/to-array (persimmon/rest l2))
                     # -> @[:bar :qux]
+
+(def m1 (persimmon/map {:foo 1 :bar 2}))
+(def m2 (persimmon/assoc m1 :qux 3))
+(def m3 (persimmon/dissoc m2 :foo))
+
+(get m2 :qux)       # -> 3
+(persimmon/to-table m3)
+                    # -> @{:bar 2 :qux 3}
+
+(def s1 (persimmon/set [:foo :bar]))
+(def s2 (persimmon/conj s1 :qux))
+
+(get s2 :qux)       # -> :qux
+(persimmon/has-key? s2 :foo)
+                    # -> true
 ```
 
 As in Clojure, `conj` adds an element wherever the structure takes one most
-cheaply — the end of a vector, the front of a list.
+cheaply — the end of a vector, the front of a list, anywhere in a set.
 
-| Function                      | Result                                      |
-| ----------------------------- | ------------------------------------------- |
-| `(persimmon/vec &opt coll)`   | a vector, optionally seeded from an indexed |
-| `(persimmon/list &opt coll)`  | a list, optionally seeded from an indexed   |
-| `(persimmon/conj coll x)`     | a vector or list with `x` added             |
-| `(persimmon/assoc vec i x)`   | a vector with index `i` replaced by `x`     |
-| `(persimmon/first lst)`       | the head of a list, or nil if it is empty   |
-| `(persimmon/rest lst)`        | a list without its head                     |
-| `(persimmon/to-array coll)`   | the elements as a mutable array             |
+| Function                       | Result                                       |
+| ------------------------------ | -------------------------------------------- |
+| `(persimmon/vec &opt coll)`    | a vector, optionally seeded from an indexed  |
+| `(persimmon/list &opt coll)`   | a list, optionally seeded from an indexed    |
+| `(persimmon/map &opt coll)`    | a map, optionally seeded from a dictionary   |
+| `(persimmon/set &opt coll)`    | a set, optionally seeded from an indexed     |
+| `(persimmon/conj coll x)`      | a vector, list or set with `x` added         |
+| `(persimmon/assoc coll k x)`   | a vector or map with `k` replaced by `x`     |
+| `(persimmon/dissoc map k)`     | a map without the key `k`                    |
+| `(persimmon/disj set x)`       | a set without the element `x`                |
+| `(persimmon/has-key? coll k)`  | whether a map or set holds `k`               |
+| `(persimmon/first lst)`        | the head of a list, or nil if it is empty    |
+| `(persimmon/rest lst)`         | a list without its head                      |
+| `(persimmon/to-array coll)`    | the elements as a mutable array              |
+| `(persimmon/to-table map)`     | the entries as a mutable table               |
 
-Both structures support `length`, `get` (including negative indices), `next`
-and so the whole of Janet's iteration machinery, `string`, and `hash`. A
-vector prints as `[foo bar]` and a list as `(foo bar)`.
+Every structure supports `length`, `get`, `next` and so the whole of Janet's
+iteration machinery, `string`, and `hash`. A vector prints as `[foo bar]`, a
+list as `(foo bar)`, a map as `{foo 1}` and a set as `#{foo bar}`.
+
+A vector and a list take an index, including a negative one. A map takes a
+key and answers with its value, and a set takes an element and answers with
+the element, as in Clojure. Because a map may hold the very keywords its
+method table answers to, a key it holds is found before any method of the
+same name.
+
+Iterating a map or a set goes through the same `next` every Janet dictionary
+uses, so `keys`, `values`, `pairs` and `each` all work as they do on a table.
+Nothing is kept between steps, so one map may be walked from several places
+at once.
+
+A nil value means no entry, as it does for a Janet table, so
+`(persimmon/assoc m :k nil)` removes the key rather than storing nothing
+under it. Nil cannot be a key: it is how Janet's iteration protocol says
+"start at the beginning", so a map or set refuses it.
 
 ## Development
 

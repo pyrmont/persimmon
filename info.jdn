@@ -22,6 +22,9 @@
                         :files ["src/persimmon.c"
                                 "src/persimmon_vector.c"
                                 "src/persimmon_list.c"
+                                "src/persimmon_hamt.c"
+                                "src/persimmon_map.c"
+                                "src/persimmon_set.c"
                                 "src/persimmon_janet.c"]
                         # The core reaches for C11 atomics when the
                         # toolchain has them and falls back to compiler
