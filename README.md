@@ -85,8 +85,39 @@ of structures must not be shared across threads.
 
 ## Installation
 
-The repository includes a Janet wrapper as an example of how Persimmon can be
-integrated into another language.
+### C
+
+The public C interface is [src/persimmon.h](src/persimmon.h). An embedding can
+compile the files under `src` directly, excluding the Janet wrapper, or link
+the static archive produced by `jeep build` and add `src` to its header search
+path.
+
+Persistent update functions take separate source and destination structures.
+The destination must be uninitialised and distinct from the source. The source
+is unchanged; on success, both structures own references and must eventually
+be deinitialised. A failed operation also leaves its destination safe to
+deinitialise.
+
+For several vector, map or set updates, use a transient. A transient can start
+empty or share a persistent source, and is consumed when persisted. Lists need
+no transient because prepending and taking the rest already cost constant time.
+
+The complete example in [res/examples/core.c](res/examples/core.c) builds with:
+
+```console
+$ cc -std=c99 -Isrc res/examples/core.c src/persimmon*.c -o persimmon-example
+$ ./persimmon-example
+empty: 0, first: 1
+first: 1, result: 1 2 3 4 5
+```
+
+The core stores opaque, fixed-size values inline. Applications storing managed
+objects supply `persimm_elem_ops`; maps additionally describe their entry
+layout and, where byte hashing is unsuitable, their key operations. The public
+header documents these host integration contracts in full.
+
+The repository also includes a Janet wrapper as an example of how Persimmon
+can be integrated into another language.
 
 ### Janet
 

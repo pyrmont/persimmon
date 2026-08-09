@@ -640,6 +640,144 @@ static void test_rejects_a_bad_layout(void) {
 
 /* Defensive Edges */
 
+static void test_persistent_operation_contracts(void) {
+    int one = 1;
+    int two = 2;
+
+    persimm_vector_t vector;
+    persimm_vector_t pushed;
+    persimm_vector_t updated;
+    CHECK(PERSIMM_OK == persimm_vector_init(&vector, sizeof(int), NULL, NULL),
+          "contract: vector init failed");
+    CHECK(PERSIMM_OK == persimm_vector_push(&vector, &one, &pushed),
+          "contract: vector push failed");
+    CHECK(0 == vector.count && 1 == pushed.count,
+          "contract: vector push changed its source");
+    CHECK(PERSIMM_OK == persimm_vector_update(&pushed, 0, &two, &updated),
+          "contract: vector update failed");
+    int *pushed_value = (int *)persimm_vector_ref(&pushed, 0);
+    int *updated_value = (int *)persimm_vector_ref(&updated, 0);
+    CHECK(NULL != pushed_value && 1 == *pushed_value,
+          "contract: vector update changed its source");
+    CHECK(NULL != updated_value && 2 == *updated_value,
+          "contract: vector update produced the wrong result");
+    CHECK(PERSIMM_ERR_INVALID == persimm_vector_push(&pushed, &two, &pushed),
+          "contract: vector push accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_vector_update(&pushed, 0, &two, &pushed),
+          "contract: vector update accepted an aliased destination");
+    persimm_vector_deinit(&updated);
+    persimm_vector_deinit(&pushed);
+    persimm_vector_deinit(&vector);
+
+    persimm_list_t list;
+    persimm_list_t consed;
+    persimm_list_t rest;
+    CHECK(PERSIMM_OK == persimm_list_init(&list, sizeof(int), NULL, NULL),
+          "contract: list init failed");
+    CHECK(PERSIMM_OK == persimm_list_cons(&list, &one, &consed),
+          "contract: list cons failed");
+    CHECK(0 == list.count && 1 == consed.count,
+          "contract: list cons changed its source");
+    CHECK(PERSIMM_OK == persimm_list_rest(&consed, &rest),
+          "contract: list rest failed");
+    CHECK(1 == consed.count && 0 == rest.count,
+          "contract: list rest changed its source");
+    CHECK(PERSIMM_ERR_INVALID == persimm_list_cons(&consed, &two, &consed),
+          "contract: list cons accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_list_rest(&consed, &consed),
+          "contract: list rest accepted an aliased destination");
+    persimm_list_deinit(&rest);
+    persimm_list_deinit(&consed);
+    persimm_list_deinit(&list);
+
+    persimm_map_t map;
+    persimm_map_t associated;
+    persimm_map_t dissociated;
+    entry_t entry = { one, two };
+    CHECK(PERSIMM_OK == persimm_map_init(&map, &map_layout, NULL, &spread_ops, NULL),
+          "contract: map init failed");
+    CHECK(PERSIMM_OK == persimm_map_assoc(&map, &entry, &associated),
+          "contract: map assoc failed");
+    CHECK(0 == map.count && 1 == associated.count && !persimm_map_has(&map, &one),
+          "contract: map assoc changed its source");
+    CHECK(PERSIMM_OK == persimm_map_dissoc(&associated, &one, &dissociated),
+          "contract: map dissoc failed");
+    CHECK(1 == associated.count && 0 == dissociated.count && persimm_map_has(&associated, &one),
+          "contract: map dissoc changed its source");
+    CHECK(PERSIMM_ERR_INVALID == persimm_map_assoc(&associated, &entry, &associated),
+          "contract: map assoc accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_map_dissoc(&associated, &one, &associated),
+          "contract: map dissoc accepted an aliased destination");
+    persimm_map_deinit(&dissociated);
+    persimm_map_deinit(&associated);
+    persimm_map_deinit(&map);
+
+    persimm_set_t set;
+    persimm_set_t conjoined;
+    persimm_set_t disjoined;
+    CHECK(PERSIMM_OK == persimm_set_init(&set, sizeof(int), NULL, &spread_ops, NULL),
+          "contract: set init failed");
+    CHECK(PERSIMM_OK == persimm_set_conj(&set, &one, &conjoined),
+          "contract: set conj failed");
+    CHECK(0 == set.count && 1 == conjoined.count && !persimm_set_has(&set, &one),
+          "contract: set conj changed its source");
+    CHECK(PERSIMM_OK == persimm_set_disj(&conjoined, &one, &disjoined),
+          "contract: set disj failed");
+    CHECK(1 == conjoined.count && 0 == disjoined.count && persimm_set_has(&conjoined, &one),
+          "contract: set disj changed its source");
+    CHECK(PERSIMM_ERR_INVALID == persimm_set_conj(&conjoined, &two, &conjoined),
+          "contract: set conj accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_set_disj(&conjoined, &one, &conjoined),
+          "contract: set disj accepted an aliased destination");
+    persimm_set_deinit(&disjoined);
+    persimm_set_deinit(&conjoined);
+    persimm_set_deinit(&set);
+}
+
+static void test_empty_transient_initialisers(void) {
+    int value = 7;
+
+    persimm_vector_transient_t vector_transient;
+    persimm_vector_t vector;
+    CHECK(PERSIMM_OK == persimm_vector_transient_init(
+                              &vector_transient, sizeof(int), NULL, NULL),
+          "transient init: vector init failed");
+    CHECK(PERSIMM_OK == persimm_vector_transient_push(&vector_transient, &value),
+          "transient init: vector push failed");
+    CHECK(PERSIMM_OK == persimm_vector_transient_persist(&vector_transient, &vector),
+          "transient init: vector persist failed");
+    CHECK(1 == vector.count, "transient init: vector result is empty");
+    persimm_vector_transient_deinit(&vector_transient);
+    persimm_vector_deinit(&vector);
+
+    persimm_map_transient_t map_transient;
+    persimm_map_t map;
+    entry_t entry = { value, value * 2 };
+    CHECK(PERSIMM_OK == persimm_map_transient_init(
+                              &map_transient, &map_layout, NULL, &spread_ops, NULL),
+          "transient init: map init failed");
+    CHECK(PERSIMM_OK == persimm_map_transient_assoc(&map_transient, &entry),
+          "transient init: map assoc failed");
+    CHECK(PERSIMM_OK == persimm_map_transient_persist(&map_transient, &map),
+          "transient init: map persist failed");
+    CHECK(1 == map.count, "transient init: map result is empty");
+    persimm_map_transient_deinit(&map_transient);
+    persimm_map_deinit(&map);
+
+    persimm_set_transient_t set_transient;
+    persimm_set_t set;
+    CHECK(PERSIMM_OK == persimm_set_transient_init(
+                              &set_transient, sizeof(int), NULL, &spread_ops, NULL),
+          "transient init: set init failed");
+    CHECK(PERSIMM_OK == persimm_set_transient_conj(&set_transient, &value),
+          "transient init: set conj failed");
+    CHECK(PERSIMM_OK == persimm_set_transient_persist(&set_transient, &set),
+          "transient init: set persist failed");
+    CHECK(1 == set.count, "transient init: set result is empty");
+    persimm_set_transient_deinit(&set_transient);
+    persimm_set_deinit(&set);
+}
+
 static void test_extreme_indexes(void) {
     size_t index = 99;
     int value = 7;
@@ -855,6 +993,68 @@ static void test_set_transient(void) {
 }
 
 #if defined(PERSIMM_TEST_ALLOC)
+static void test_persistent_failure_contracts(void) {
+    int value = 1;
+
+    persimm_vector_t vector;
+    persimm_vector_t vector_dest;
+    persimm_vector_init(&vector, sizeof(int), NULL, NULL);
+    fail_allocation_after(0);
+    CHECK(PERSIMM_ERR_ALLOC == persimm_vector_push(&vector, &value, &vector_dest),
+          "contract: failed vector push returned the wrong status");
+    allow_allocations();
+    CHECK(0 == vector.count && 0 == vector_dest.count && NULL == vector_dest.tail,
+          "contract: failed vector push left a changed source or live destination");
+    persimm_vector_deinit(&vector_dest);
+    persimm_vector_deinit(&vector);
+
+    persimm_list_t list;
+    persimm_list_t list_dest;
+    persimm_list_init(&list, sizeof(int), NULL, NULL);
+    fail_allocation_after(0);
+    CHECK(PERSIMM_ERR_ALLOC == persimm_list_cons(&list, &value, &list_dest),
+          "contract: failed list cons returned the wrong status");
+    allow_allocations();
+    CHECK(0 == list.count && 0 == list_dest.count && NULL == list_dest.head,
+          "contract: failed list cons left a changed source or live destination");
+    persimm_list_deinit(&list_dest);
+    persimm_list_deinit(&list);
+
+    persimm_map_t map;
+    persimm_map_t map_dest;
+    entry_t entry = { value, value };
+    persimm_map_init(&map, &map_layout, NULL, &spread_ops, NULL);
+    fail_allocation_after(0);
+    CHECK(PERSIMM_ERR_ALLOC == persimm_map_assoc(&map, &entry, &map_dest),
+          "contract: failed map assoc returned the wrong status");
+    allow_allocations();
+    CHECK(0 == map.count && 0 == map_dest.count && NULL == map_dest.root,
+          "contract: failed map assoc left a changed source or live destination");
+    persimm_map_deinit(&map_dest);
+    persimm_map_deinit(&map);
+
+    persimm_set_t set;
+    persimm_set_t set_dest;
+    persimm_set_init(&set, sizeof(int), NULL, &spread_ops, NULL);
+    fail_allocation_after(0);
+    CHECK(PERSIMM_ERR_ALLOC == persimm_set_conj(&set, &value, &set_dest),
+          "contract: failed set conj returned the wrong status");
+    allow_allocations();
+    CHECK(0 == set.count && 0 == set_dest.count && NULL == set_dest.root,
+          "contract: failed set conj left a changed source or live destination");
+    persimm_set_deinit(&set_dest);
+    persimm_set_deinit(&set);
+
+    persimm_vector_transient_t transient;
+    fail_allocation_after(0);
+    CHECK(PERSIMM_ERR_ALLOC == persimm_vector_transient_init(
+                                    &transient, sizeof(int), NULL, NULL),
+          "contract: failed transient init returned the wrong status");
+    allow_allocations();
+    persimm_vector_transient_deinit(&transient);
+    CHECK(0 == allocated_blocks, "contract: failure checks leaked %zu blocks", allocated_blocks);
+}
+
 static void test_transient_allocation_failures(void) {
     persimm_vector_t vector;
     persimm_vector_init(&vector, sizeof(int), NULL, NULL);
@@ -1037,6 +1237,8 @@ int main(void) {
 
     test_byte_defaults();
     test_rejects_a_bad_layout();
+    test_persistent_operation_contracts();
+    test_empty_transient_initialisers();
     test_extreme_indexes();
     test_cursor_survives_same_count_change();
     test_replacement_may_alias_storage();
@@ -1045,6 +1247,7 @@ int main(void) {
     test_map_transient();
     test_set_transient();
 #if defined(PERSIMM_TEST_ALLOC)
+    test_persistent_failure_contracts();
     test_transient_allocation_failures();
     test_assoc_allocation_failures();
     test_dissoc_allocation_failures();

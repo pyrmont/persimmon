@@ -216,8 +216,27 @@ typedef struct {
  */
 bool persimm_has_atomic_refcounts(void);
 
+/* Persistent Updates */
+
+/*
+ * Every persistent update takes a const source and writes its result to a
+ * separate, uninitialised destination. The source remains unchanged. On
+ * success, source and destination each own a reference and must eventually be
+ * deinitialised. On failure, the destination is still safe to deinitialise.
+ * Passing the source itself as the destination returns PERSIMM_ERR_INVALID.
+ */
+
 /* Transients */
 
+/*
+ * A `*_to_transient` function starts from a persistent source without changing
+ * it. A `*_transient_init` function instead starts an empty transient and
+ * leaves it safe to deinitialise if initialisation fails. Mutations keep the
+ * transient active even when they return an error.
+ *
+ * Persisting writes to an uninitialised destination and consumes the
+ * transient. Deinitialising a consumed transient is safe.
+ */
 void persimm_vector_to_transient(const persimm_vector_t *src,
                                  persimm_vector_transient_t *transient);
 persimm_status persimm_vector_transient_init(persimm_vector_transient_t *transient,
@@ -288,10 +307,9 @@ bool persimm_vector_index(const persimm_vector_t *vector, int64_t input, size_t 
 
 /*
  * Appends `elem` to `src`, placing the resulting persistent vector in `dest`.
- * `src` is unchanged and `dest` must be uninitialised and distinct from it.
+ * `src` is unchanged and `dest` follows the persistent update contract above.
  * The result shares every node the new path does not need to copy.
  *
- * On failure `src` remains unchanged and `dest` is safe to deinitialise.
  */
 persimm_status persimm_vector_push(const persimm_vector_t *src, const void *elem,
                                    persimm_vector_t *dest);
@@ -430,8 +448,6 @@ bool persimm_map_has(const persimm_map_t *map, const void *key);
 /*
  * Stores `entry` in a persistent copy of `src`. Where the key is already
  * present only the value is replaced, and the key already stored stays.
- *
- * On failure the map is unchanged and remains safe to deinitialise.
  */
 persimm_status persimm_map_assoc(const persimm_map_t *src, const void *entry,
                                  persimm_map_t *dest);
