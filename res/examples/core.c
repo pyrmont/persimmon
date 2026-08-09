@@ -20,7 +20,7 @@ int main(void) {
     printf("empty: %zu, first: %zu\n", empty.count, first.count);
 
     persimm_vector_transient_t transient;
-    persimm_vector_to_transient(&first, &transient);
+    check(persimm_vector_to_transient(&first, &transient), "make transient");
     for (int value = 2; value <= 5; value++) {
         check(persimm_vector_transient_push(&transient, &value), "append transiently");
     }

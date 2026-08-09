@@ -129,9 +129,10 @@ static const persimm_key_ops zero_hash_ops = { zero_hash, NULL, NULL, NULL, NULL
 static persimm_status test_vector_transient_push(persimm_vector_t *vector,
                                                  const void *elem) {
     persimm_vector_transient_t transient;
-    persimm_vector_to_transient(vector, &transient);
+    persimm_status status = persimm_vector_to_transient(vector, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_vector_deinit(vector);
-    persimm_status status = persimm_vector_transient_push(&transient, elem);
+    status = persimm_vector_transient_push(&transient, elem);
     persimm_status persisted = persimm_vector_transient_persist(&transient, vector);
     return PERSIMM_OK == status ? persisted : status;
 }
@@ -139,9 +140,10 @@ static persimm_status test_vector_transient_push(persimm_vector_t *vector,
 static persimm_status test_vector_transient_update(persimm_vector_t *vector, size_t index,
                                                    const void *elem) {
     persimm_vector_transient_t transient;
-    persimm_vector_to_transient(vector, &transient);
+    persimm_status status = persimm_vector_to_transient(vector, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_vector_deinit(vector);
-    persimm_status status = persimm_vector_transient_update(&transient, index, elem);
+    status = persimm_vector_transient_update(&transient, index, elem);
     persimm_status persisted = persimm_vector_transient_persist(&transient, vector);
     return PERSIMM_OK == status ? persisted : status;
 }
@@ -168,18 +170,20 @@ static persimm_status test_list_advance_rest(persimm_list_t *list) {
 
 static persimm_status test_map_transient_assoc(persimm_map_t *map, const void *entry) {
     persimm_map_transient_t transient;
-    persimm_map_to_transient(map, &transient);
+    persimm_status status = persimm_map_to_transient(map, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_map_deinit(map);
-    persimm_status status = persimm_map_transient_assoc(&transient, entry);
+    status = persimm_map_transient_assoc(&transient, entry);
     persimm_status persisted = persimm_map_transient_persist(&transient, map);
     return PERSIMM_OK == status ? persisted : status;
 }
 
 static persimm_status test_map_transient_dissoc(persimm_map_t *map, const void *key) {
     persimm_map_transient_t transient;
-    persimm_map_to_transient(map, &transient);
+    persimm_status status = persimm_map_to_transient(map, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_map_deinit(map);
-    persimm_status status = persimm_map_transient_dissoc(&transient, key);
+    status = persimm_map_transient_dissoc(&transient, key);
     persimm_status persisted = persimm_map_transient_persist(&transient, map);
     return PERSIMM_OK == status ? persisted : status;
 }
@@ -206,18 +210,20 @@ static persimm_status test_map_advance_dissoc(persimm_map_t *map, const void *ke
 
 static persimm_status test_set_transient_conj(persimm_set_t *set, const void *elem) {
     persimm_set_transient_t transient;
-    persimm_set_to_transient(set, &transient);
+    persimm_status status = persimm_set_to_transient(set, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_set_deinit(set);
-    persimm_status status = persimm_set_transient_conj(&transient, elem);
+    status = persimm_set_transient_conj(&transient, elem);
     persimm_status persisted = persimm_set_transient_persist(&transient, set);
     return PERSIMM_OK == status ? persisted : status;
 }
 
 static persimm_status test_set_transient_disj(persimm_set_t *set, const void *elem) {
     persimm_set_transient_t transient;
-    persimm_set_to_transient(set, &transient);
+    persimm_status status = persimm_set_to_transient(set, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_set_deinit(set);
-    persimm_status status = persimm_set_transient_disj(&transient, elem);
+    status = persimm_set_transient_disj(&transient, elem);
     persimm_status persisted = persimm_set_transient_persist(&transient, set);
     return PERSIMM_OK == status ? persisted : status;
 }
@@ -413,9 +419,11 @@ static void test_sharing(const persimm_key_ops *ops, const char *label, int n) {
     persimm_map_t added;
     persimm_map_t replaced;
     persimm_map_t dropped;
-    persimm_map_clone(&base, &added);
-    persimm_map_clone(&base, &replaced);
-    persimm_map_clone(&base, &dropped);
+    CHECK(PERSIMM_OK == persimm_map_clone(&base, &added), "%s: clone for add failed", label);
+    CHECK(PERSIMM_OK == persimm_map_clone(&base, &replaced),
+          "%s: clone for replacement failed", label);
+    CHECK(PERSIMM_OK == persimm_map_clone(&base, &dropped),
+          "%s: clone for removal failed", label);
 
     entry_t fresh = { n + 100, 7 };
     test_map_advance_assoc(&added, &fresh);
@@ -592,7 +600,7 @@ static void test_map_refcounts(const persimm_key_ops *ops, const char *label, in
     /* A copy that grows, changes and shrinks shares a great deal with what it
        was copied from, and must leave every one of those elements held once. */
     persimm_map_t copy;
-    persimm_map_clone(&base, &copy);
+    CHECK(PERSIMM_OK == persimm_map_clone(&base, &copy), "%s: map clone failed", label);
     for (int i = n; i < n + 50; i++) {
         entry_t entry = { i, RC_VALUE_BASE + i };
         test_map_advance_assoc(&copy, &entry);
@@ -639,7 +647,7 @@ static void test_set_refcounts(const persimm_key_ops *ops, const char *label, in
     CHECK(0 == wrong, "%s: %d elements at the wrong count once built", label, wrong);
 
     persimm_set_t copy;
-    persimm_set_clone(&base, &copy);
+    CHECK(PERSIMM_OK == persimm_set_clone(&base, &copy), "%s: set clone failed", label);
     for (int i = 0; i < n; i += 2) test_set_advance_disj(&copy, &i);
     for (int i = 0; i < n; i++) CHECK(persimm_set_has(&base, &i), "%s: the original lost %d",
                                       label, i);
@@ -729,7 +737,12 @@ static void test_persistent_operation_contracts(void) {
           "contract: vector push accepted an aliased destination");
     CHECK(PERSIMM_ERR_INVALID == persimm_vector_update(&pushed, 0, &two, &pushed),
           "contract: vector update accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_vector_clone(&pushed, &pushed),
+          "contract: vector clone accepted an aliased destination");
+    CHECK(1 == pushed.count && 1 == *(const int *)persimm_vector_ref(&pushed, 0),
+          "contract: rejected vector clone changed its source");
     persimm_vector_deinit(&updated);
+    persimm_vector_deinit(&pushed);
     persimm_vector_deinit(&pushed);
     persimm_vector_deinit(&vector);
 
@@ -750,7 +763,12 @@ static void test_persistent_operation_contracts(void) {
           "contract: list cons accepted an aliased destination");
     CHECK(PERSIMM_ERR_INVALID == persimm_list_rest(&consed, &consed),
           "contract: list rest accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_list_clone(&consed, &consed),
+          "contract: list clone accepted an aliased destination");
+    CHECK(1 == consed.count && 1 == *(const int *)persimm_list_first(&consed),
+          "contract: rejected list clone changed its source");
     persimm_list_deinit(&rest);
+    persimm_list_deinit(&consed);
     persimm_list_deinit(&consed);
     persimm_list_deinit(&list);
 
@@ -773,7 +791,12 @@ static void test_persistent_operation_contracts(void) {
           "contract: map assoc accepted an aliased destination");
     CHECK(PERSIMM_ERR_INVALID == persimm_map_dissoc(&associated, &one, &associated),
           "contract: map dissoc accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_map_clone(&associated, &associated),
+          "contract: map clone accepted an aliased destination");
+    CHECK(1 == associated.count && persimm_map_has(&associated, &one),
+          "contract: rejected map clone changed its source");
     persimm_map_deinit(&dissociated);
+    persimm_map_deinit(&associated);
     persimm_map_deinit(&associated);
     persimm_map_deinit(&map);
 
@@ -794,7 +817,12 @@ static void test_persistent_operation_contracts(void) {
           "contract: set conj accepted an aliased destination");
     CHECK(PERSIMM_ERR_INVALID == persimm_set_disj(&conjoined, &one, &conjoined),
           "contract: set disj accepted an aliased destination");
+    CHECK(PERSIMM_ERR_INVALID == persimm_set_clone(&conjoined, &conjoined),
+          "contract: set clone accepted an aliased destination");
+    CHECK(1 == conjoined.count && persimm_set_has(&conjoined, &one),
+          "contract: rejected set clone changed its source");
     persimm_set_deinit(&disjoined);
+    persimm_set_deinit(&conjoined);
     persimm_set_deinit(&conjoined);
     persimm_set_deinit(&set);
 }
@@ -809,6 +837,17 @@ static void test_empty_transient_initialisers(void) {
           "transient init: vector init failed");
     CHECK(PERSIMM_OK == persimm_vector_transient_push(&vector_transient, &value),
           "transient init: vector push failed");
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_vector_to_transient(&vector_transient.value, &vector_transient),
+          "transient init: vector conversion accepted overlapping storage");
+    CHECK(vector_transient.active && 1 == vector_transient.value.count,
+          "transient init: rejected vector conversion changed its input");
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_vector_transient_persist(&vector_transient,
+                                                &vector_transient.value),
+          "transient init: vector persist accepted overlapping storage");
+    CHECK(vector_transient.active && 1 == vector_transient.value.count,
+          "transient init: rejected vector persist consumed its input");
     CHECK(PERSIMM_OK == persimm_vector_transient_persist(&vector_transient, &vector),
           "transient init: vector persist failed");
     CHECK(1 == vector.count, "transient init: vector result is empty");
@@ -823,6 +862,16 @@ static void test_empty_transient_initialisers(void) {
           "transient init: map init failed");
     CHECK(PERSIMM_OK == persimm_map_transient_assoc(&map_transient, &entry),
           "transient init: map assoc failed");
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_map_to_transient(&map_transient.value, &map_transient),
+          "transient init: map conversion accepted overlapping storage");
+    CHECK(map_transient.active && 1 == map_transient.value.count,
+          "transient init: rejected map conversion changed its input");
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_map_transient_persist(&map_transient, &map_transient.value),
+          "transient init: map persist accepted overlapping storage");
+    CHECK(map_transient.active && 1 == map_transient.value.count,
+          "transient init: rejected map persist consumed its input");
     CHECK(PERSIMM_OK == persimm_map_transient_persist(&map_transient, &map),
           "transient init: map persist failed");
     CHECK(1 == map.count, "transient init: map result is empty");
@@ -836,6 +885,16 @@ static void test_empty_transient_initialisers(void) {
           "transient init: set init failed");
     CHECK(PERSIMM_OK == persimm_set_transient_conj(&set_transient, &value),
           "transient init: set conj failed");
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_set_to_transient(&set_transient.value, &set_transient),
+          "transient init: set conversion accepted overlapping storage");
+    CHECK(set_transient.active && 1 == set_transient.value.count,
+          "transient init: rejected set conversion changed its input");
+    CHECK(PERSIMM_ERR_INVALID ==
+              persimm_set_transient_persist(&set_transient, &set_transient.value),
+          "transient init: set persist accepted overlapping storage");
+    CHECK(set_transient.active && 1 == set_transient.value.count,
+          "transient init: rejected set persist consumed its input");
     CHECK(PERSIMM_OK == persimm_set_transient_persist(&set_transient, &set),
           "transient init: set persist failed");
     CHECK(1 == set.count, "transient init: set result is empty");
@@ -961,7 +1020,8 @@ static void test_vector_transient(void) {
     for (int i = 0; i < 100; i++) test_vector_transient_push(&base, &i);
 
     persimm_vector_transient_t transient;
-    persimm_vector_to_transient(&base, &transient);
+    CHECK(PERSIMM_OK == persimm_vector_to_transient(&base, &transient),
+          "transient vector: conversion failed");
     int replacement = -1;
     int fresh = 100;
     CHECK(PERSIMM_OK == persimm_vector_transient_update(&transient, 10, &replacement),
@@ -1001,7 +1061,8 @@ static void test_map_transient(void) {
     }
 
     persimm_map_transient_t transient;
-    persimm_map_to_transient(&base, &transient);
+    CHECK(PERSIMM_OK == persimm_map_to_transient(&base, &transient),
+          "transient map: conversion failed");
     int victim = 10;
     entry_t replacement = { 11, RC_VALUE_BASE + 11 };
     entry_t fresh = { 100, RC_VALUE_BASE + 100 };
@@ -1036,7 +1097,8 @@ static void test_set_transient(void) {
     for (int i = 0; i < 100; i++) test_set_transient_conj(&base, &i);
 
     persimm_set_transient_t transient;
-    persimm_set_to_transient(&base, &transient);
+    CHECK(PERSIMM_OK == persimm_set_to_transient(&base, &transient),
+          "transient set: conversion failed");
     int victim = 10;
     int fresh = 100;
     CHECK(PERSIMM_OK == persimm_set_transient_disj(&transient, &victim),
@@ -1127,7 +1189,8 @@ static void test_transient_allocation_failures(void) {
     persimm_vector_init(&vector, sizeof(int), NULL, NULL);
     for (int i = 0; i < 32; i++) test_vector_transient_push(&vector, &i);
     persimm_vector_transient_t vector_transient;
-    persimm_vector_to_transient(&vector, &vector_transient);
+    CHECK(PERSIMM_OK == persimm_vector_to_transient(&vector, &vector_transient),
+          "transient allocation: vector conversion failed");
 
     int fresh = 32;
     fail_allocation_after(0);
@@ -1148,7 +1211,8 @@ static void test_transient_allocation_failures(void) {
         test_map_transient_assoc(&map, &entry);
     }
     persimm_map_transient_t map_transient;
-    persimm_map_to_transient(&map, &map_transient);
+    CHECK(PERSIMM_OK == persimm_map_to_transient(&map, &map_transient),
+          "transient allocation: map conversion failed");
     entry_t entry = { 1000, 1000 };
 
     fail_allocation_after(0);
@@ -1180,7 +1244,8 @@ static void test_assoc_allocation_failures(void) {
         persimm_map_t base;
         persimm_map_t copy;
         build_fault_map(&base, &spread_ops);
-        persimm_map_clone(&base, &copy);
+        CHECK(PERSIMM_OK == persimm_map_clone(&base, &copy),
+              "allocation: map clone failed");
 
         entry_t fresh = { 1000, 1000 };
         fail_allocation_after(fail);
@@ -1209,7 +1274,8 @@ static void test_dissoc_allocation_failures(void) {
         persimm_map_t base;
         persimm_map_t copy;
         build_fault_map(&base, &spread_ops);
-        persimm_map_clone(&base, &copy);
+        CHECK(PERSIMM_OK == persimm_map_clone(&base, &copy),
+              "allocation: map clone failed");
 
         int victim = 17;
         fail_allocation_after(fail);
@@ -1242,7 +1308,8 @@ static void test_collision_reparent_allocation_failures(void) {
         entry_t second = { 4, 4 };
         test_map_transient_assoc(&base, &first);
         test_map_transient_assoc(&base, &second);
-        persimm_map_clone(&base, &copy);
+        CHECK(PERSIMM_OK == persimm_map_clone(&base, &copy),
+              "allocation: collision map clone failed");
 
         entry_t fresh = { 1, 1 };
         fail_allocation_after(fail);

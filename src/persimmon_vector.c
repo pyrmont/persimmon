@@ -141,7 +141,8 @@ persimm_status persimm_vector_init(persimm_vector_t *vector, size_t elem_size,
     return PERSIMM_OK;
 }
 
-void persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest) {
+persimm_status persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest) {
+    if (src == dest) return PERSIMM_ERR_INVALID;
     dest->shift = src->shift;
     dest->count = src->count;
     dest->tail_count = src->tail_count;
@@ -152,14 +153,17 @@ void persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest) {
     if (NULL != dest->root) PERSIMM_RC_INC(dest->root->ref_count);
     dest->tail = src->tail;
     if (NULL != dest->tail) PERSIMM_RC_INC(dest->tail->ref_count);
+    return PERSIMM_OK;
 }
 
 /* Transients */
 
-void persimm_vector_to_transient(const persimm_vector_t *src,
-                                 persimm_vector_transient_t *transient) {
-    persimm_vector_clone(src, &transient->value);
+persimm_status persimm_vector_to_transient(const persimm_vector_t *src,
+                                           persimm_vector_transient_t *transient) {
+    persimm_status status = persimm_vector_clone(src, &transient->value);
+    if (PERSIMM_OK != status) return status;
     transient->active = true;
+    return PERSIMM_OK;
 }
 
 persimm_status persimm_vector_transient_init(persimm_vector_transient_t *transient,
@@ -189,6 +193,7 @@ persimm_status persimm_vector_transient_update(persimm_vector_transient_t *trans
 
 persimm_status persimm_vector_transient_persist(persimm_vector_transient_t *transient,
                                                 persimm_vector_t *dest) {
+    if (&transient->value == dest) return PERSIMM_ERR_INVALID;
     if (!transient->active) {
         memset(dest, 0, sizeof(*dest));
         return PERSIMM_ERR_INVALID;
@@ -382,18 +387,18 @@ static persimm_status persimm_vector_update_in_place(persimm_vector_t *vector, s
 
 persimm_status persimm_vector_push(const persimm_vector_t *src, const void *elem,
                                    persimm_vector_t *dest) {
-    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
-    persimm_vector_clone(src, dest);
-    persimm_status status = persimm_vector_push_in_place(dest, elem, true);
+    persimm_status status = persimm_vector_clone(src, dest);
+    if (PERSIMM_OK != status) return status;
+    status = persimm_vector_push_in_place(dest, elem, true);
     if (PERSIMM_OK != status) persimm_vector_deinit(dest);
     return status;
 }
 
 persimm_status persimm_vector_update(const persimm_vector_t *src, size_t index,
                                      const void *elem, persimm_vector_t *dest) {
-    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
-    persimm_vector_clone(src, dest);
-    persimm_status status = persimm_vector_update_in_place(dest, index, elem, true);
+    persimm_status status = persimm_vector_clone(src, dest);
+    if (PERSIMM_OK != status) return status;
+    status = persimm_vector_update_in_place(dest, index, elem, true);
     if (PERSIMM_OK != status) persimm_vector_deinit(dest);
     return status;
 }

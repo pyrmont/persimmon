@@ -72,7 +72,8 @@ persimm_status persimm_list_init(persimm_list_t *list, size_t elem_size,
     return PERSIMM_OK;
 }
 
-void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest) {
+persimm_status persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest) {
+    if (src == dest) return PERSIMM_ERR_INVALID;
     dest->count = src->count;
     dest->generation = src->generation;
     dest->elem_size = src->elem_size;
@@ -80,6 +81,7 @@ void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest) {
     dest->ctx = src->ctx;
     dest->head = src->head;
     if (NULL != dest->head) PERSIMM_RC_INC(dest->head->ref_count);
+    return PERSIMM_OK;
 }
 
 /* Accessing */
@@ -194,17 +196,17 @@ static persimm_status persimm_list_rest_in_place(persimm_list_t *list) {
 
 persimm_status persimm_list_cons(const persimm_list_t *src, const void *elem,
                                  persimm_list_t *dest) {
-    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
-    persimm_list_clone(src, dest);
-    persimm_status status = persimm_list_cons_in_place(dest, elem);
+    persimm_status status = persimm_list_clone(src, dest);
+    if (PERSIMM_OK != status) return status;
+    status = persimm_list_cons_in_place(dest, elem);
     if (PERSIMM_OK != status) persimm_list_deinit(dest);
     return status;
 }
 
 persimm_status persimm_list_rest(const persimm_list_t *src, persimm_list_t *dest) {
-    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
-    persimm_list_clone(src, dest);
-    persimm_status status = persimm_list_rest_in_place(dest);
+    persimm_status status = persimm_list_clone(src, dest);
+    if (PERSIMM_OK != status) return status;
+    status = persimm_list_rest_in_place(dest);
     if (PERSIMM_OK != status) persimm_list_deinit(dest);
     return status;
 }

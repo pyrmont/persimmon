@@ -38,20 +38,25 @@ persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size,
     return PERSIMM_OK;
 }
 
-void persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest) {
+persimm_status persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest) {
+    if (src == dest) return PERSIMM_ERR_INVALID;
     dest->count = src->count;
     dest->layout = src->layout;
     dest->key_ops = src->key_ops;
     dest->key_ctx = src->key_ctx;
     dest->root = src->root;
     persimm_hamt_retain(dest->root);
+    return PERSIMM_OK;
 }
 
 /* Transients */
 
-void persimm_set_to_transient(const persimm_set_t *src, persimm_set_transient_t *transient) {
-    persimm_set_clone(src, &transient->value);
+persimm_status persimm_set_to_transient(const persimm_set_t *src,
+                                        persimm_set_transient_t *transient) {
+    persimm_status status = persimm_set_clone(src, &transient->value);
+    if (PERSIMM_OK != status) return status;
     transient->active = true;
+    return PERSIMM_OK;
 }
 
 persimm_status persimm_set_transient_init(persimm_set_transient_t *transient,
@@ -81,6 +86,7 @@ persimm_status persimm_set_transient_disj(persimm_set_transient_t *transient,
 
 persimm_status persimm_set_transient_persist(persimm_set_transient_t *transient,
                                              persimm_set_t *dest) {
+    if (&transient->value == dest) return PERSIMM_ERR_INVALID;
     if (!transient->active) {
         memset(dest, 0, sizeof(*dest));
         return PERSIMM_ERR_INVALID;
@@ -95,9 +101,11 @@ persimm_status persimm_set_transient_persist(persimm_set_transient_t *transient,
 /* Deinitialising */
 
 void persimm_set_deinit(persimm_set_t *set) {
-    persimm_hamt_t hamt;
-    persimm_set_hamt(set, &hamt);
-    persimm_hamt_release(set->root, &hamt);
+    if (NULL != set->root) {
+        persimm_hamt_t hamt;
+        persimm_set_hamt(set, &hamt);
+        persimm_hamt_release(set->root, &hamt);
+    }
     set->root = NULL;
     set->count = 0;
 }
@@ -148,18 +156,18 @@ static persimm_status persimm_set_disj_in_place(persimm_set_t *set, const void *
 
 persimm_status persimm_set_conj(const persimm_set_t *src, const void *elem,
                                 persimm_set_t *dest) {
-    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
-    persimm_set_clone(src, dest);
-    persimm_status status = persimm_set_conj_in_place(dest, elem, true);
+    persimm_status status = persimm_set_clone(src, dest);
+    if (PERSIMM_OK != status) return status;
+    status = persimm_set_conj_in_place(dest, elem, true);
     if (PERSIMM_OK != status) persimm_set_deinit(dest);
     return status;
 }
 
 persimm_status persimm_set_disj(const persimm_set_t *src, const void *elem,
                                 persimm_set_t *dest) {
-    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
-    persimm_set_clone(src, dest);
-    persimm_status status = persimm_set_disj_in_place(dest, elem, true);
+    persimm_status status = persimm_set_clone(src, dest);
+    if (PERSIMM_OK != status) return status;
+    status = persimm_set_disj_in_place(dest, elem, true);
     if (PERSIMM_OK != status) persimm_set_deinit(dest);
     return status;
 }

@@ -91,9 +91,10 @@ static int64_t janet_persimm_integer(Janet input) {
 static persimm_status janet_persimm_vector_build_push(persimm_vector_t *vector,
                                                       const void *elem) {
     persimm_vector_transient_t transient;
-    persimm_vector_to_transient(vector, &transient);
+    persimm_status status = persimm_vector_to_transient(vector, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_vector_deinit(vector);
-    persimm_status status = persimm_vector_transient_push(&transient, elem);
+    status = persimm_vector_transient_push(&transient, elem);
     persimm_status persisted = persimm_vector_transient_persist(&transient, vector);
     return PERSIMM_OK == status ? persisted : status;
 }
@@ -112,9 +113,10 @@ static persimm_status janet_persimm_list_build_cons(persimm_list_t *list,
 static persimm_status janet_persimm_map_build_assoc(persimm_map_t *map,
                                                     const void *entry) {
     persimm_map_transient_t transient;
-    persimm_map_to_transient(map, &transient);
+    persimm_status status = persimm_map_to_transient(map, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_map_deinit(map);
-    persimm_status status = persimm_map_transient_assoc(&transient, entry);
+    status = persimm_map_transient_assoc(&transient, entry);
     persimm_status persisted = persimm_map_transient_persist(&transient, map);
     return PERSIMM_OK == status ? persisted : status;
 }
@@ -122,9 +124,10 @@ static persimm_status janet_persimm_map_build_assoc(persimm_map_t *map,
 static persimm_status janet_persimm_set_build_conj(persimm_set_t *set,
                                                    const void *elem) {
     persimm_set_transient_t transient;
-    persimm_set_to_transient(set, &transient);
+    persimm_status status = persimm_set_to_transient(set, &transient);
+    if (PERSIMM_OK != status) return status;
     persimm_set_deinit(set);
-    persimm_status status = persimm_set_transient_conj(&transient, elem);
+    status = persimm_set_transient_conj(&transient, elem);
     persimm_status persisted = persimm_set_transient_persist(&transient, set);
     return PERSIMM_OK == status ? persisted : status;
 }
@@ -618,7 +621,7 @@ static void *janet_persimm_list_unmarshal(JanetMarshalContext *ctx) {
     }
 
     persimm_list_deinit(&wrapper->list);
-    persimm_list_clone(&ordered, &wrapper->list);
+    janet_persimm_check(persimm_list_clone(&ordered, &wrapper->list));
     persimm_list_deinit(&ordered);
     persimm_list_cursor_reset(&wrapper->cursor);
 
@@ -1207,7 +1210,7 @@ static Janet cfun_persimm_vec(int32_t argc, Janet *argv) {
         /* Every value remains reachable through argv[0], so construction can
            keep one transient for the whole batch. */
         persimm_vector_transient_t transient;
-        persimm_vector_to_transient(vector, &transient);
+        janet_persimm_check(persimm_vector_to_transient(vector, &transient));
         persimm_vector_deinit(vector);
         for (int32_t i = 0; i < view.len; i++) {
             persimm_status status = persimm_vector_transient_push(&transient, &view.items[i]);
@@ -1253,7 +1256,7 @@ static Janet cfun_persimm_map(int32_t argc, Janet *argv) {
             janet_panicf("expected a table or struct, got %v", argv[0]);
         }
         persimm_map_transient_t transient;
-        persimm_map_to_transient(map, &transient);
+        janet_persimm_check(persimm_map_to_transient(map, &transient));
         persimm_map_deinit(map);
         for (int32_t i = 0; i < cap; i++) {
             /* An unused slot carries a nil key, and a nil value is no entry. */
@@ -1285,7 +1288,7 @@ static Janet cfun_persimm_set(int32_t argc, Janet *argv) {
         }
 
         persimm_set_transient_t transient;
-        persimm_set_to_transient(set, &transient);
+        janet_persimm_check(persimm_set_to_transient(set, &transient));
         persimm_set_deinit(set);
         for (int32_t i = 0; i < view.len; i++) {
             persimm_status status = persimm_set_transient_conj(&transient, &view.items[i]);
@@ -1398,7 +1401,8 @@ static Janet cfun_persimm_transient(int32_t argc, Janet *argv) {
         persimm_vector_transient_t *transient =
             (persimm_vector_transient_t *)janet_abstract(
                 &persimm_vector_transient_type, sizeof(persimm_vector_transient_t));
-        persimm_vector_to_transient((persimm_vector_t *)janet_unwrap_abstract(argv[0]), transient);
+        janet_persimm_check(persimm_vector_to_transient(
+            (persimm_vector_t *)janet_unwrap_abstract(argv[0]), transient));
         return janet_wrap_abstract(transient);
     }
 
@@ -1406,7 +1410,8 @@ static Janet cfun_persimm_transient(int32_t argc, Janet *argv) {
         persimm_map_transient_t *transient =
             (persimm_map_transient_t *)janet_abstract(
                 &persimm_map_transient_type, sizeof(persimm_map_transient_t));
-        persimm_map_to_transient((persimm_map_t *)janet_unwrap_abstract(argv[0]), transient);
+        janet_persimm_check(persimm_map_to_transient(
+            (persimm_map_t *)janet_unwrap_abstract(argv[0]), transient));
         return janet_wrap_abstract(transient);
     }
 
@@ -1414,7 +1419,8 @@ static Janet cfun_persimm_transient(int32_t argc, Janet *argv) {
         persimm_set_transient_t *transient =
             (persimm_set_transient_t *)janet_abstract(
                 &persimm_set_transient_type, sizeof(persimm_set_transient_t));
-        persimm_set_to_transient((persimm_set_t *)janet_unwrap_abstract(argv[0]), transient);
+        janet_persimm_check(persimm_set_to_transient(
+            (persimm_set_t *)janet_unwrap_abstract(argv[0]), transient));
         return janet_wrap_abstract(transient);
     }
 
@@ -1574,7 +1580,7 @@ static Janet cfun_persimm_rest(int32_t argc, Janet *argv) {
     if (old_list->list.count > 0) {
         janet_persimm_check(persimm_list_rest(&old_list->list, &new_list->list));
     } else {
-        persimm_list_clone(&old_list->list, &new_list->list);
+        janet_persimm_check(persimm_list_clone(&old_list->list, &new_list->list));
     }
 
     return janet_wrap_abstract(new_list);

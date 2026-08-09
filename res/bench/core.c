@@ -229,7 +229,7 @@ static void benchmark_map(void) {
     report("map assoc (transient)", count, seconds_since(start));
     check(persimm_map_transient_persist(&transient, &map), "persist map transient");
 
-    persimm_map_to_transient(&map, &transient);
+    check(persimm_map_to_transient(&map, &transient), "make map transient");
     persimm_map_deinit(&map);
     start = clock();
     for (size_t i = 0; i < count; i++) {

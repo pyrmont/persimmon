@@ -90,6 +90,8 @@ typedef struct {
 /*
  * Operation tables and contexts are borrowed rather than copied. They must
  * outlive the collection and every clone or transient derived from it.
+ * Deinitialisation releases a collection's current storage and may safely be
+ * repeated.
  */
 
 /* Types */
@@ -224,15 +226,19 @@ bool persimm_has_atomic_refcounts(void);
 
 /*
  * A `*_to_transient` function starts from a persistent source without changing
- * it. A `*_transient_init` function instead starts an empty transient and
- * leaves it safe to deinitialise if initialisation fails. Mutations keep the
- * transient active even when they return an error.
+ * it. The destination must be uninitialised, and its embedded collection must
+ * be distinct from the source; an alias is rejected without changing either
+ * argument. A `*_transient_init` function instead starts an empty transient
+ * and leaves it safe to deinitialise if initialisation fails. Mutations keep
+ * the transient active even when they return an error.
  *
  * Persisting writes to an uninitialised destination and consumes the
- * transient. Deinitialising a consumed transient is safe.
+ * transient. The destination must not be the transient's embedded collection;
+ * that alias is rejected without consuming the transient. Deinitialising a
+ * consumed transient is safe.
  */
-void persimm_vector_to_transient(const persimm_vector_t *src,
-                                 persimm_vector_transient_t *transient);
+persimm_status persimm_vector_to_transient(const persimm_vector_t *src,
+                                           persimm_vector_transient_t *transient);
 persimm_status persimm_vector_transient_init(persimm_vector_transient_t *transient,
                                              size_t elem_size,
                                              const persimm_elem_ops *ops, void *ctx);
@@ -244,7 +250,8 @@ persimm_status persimm_vector_transient_update(persimm_vector_transient_t *trans
 persimm_status persimm_vector_transient_persist(persimm_vector_transient_t *transient,
                                                 persimm_vector_t *dest);
 
-void persimm_map_to_transient(const persimm_map_t *src, persimm_map_transient_t *transient);
+persimm_status persimm_map_to_transient(const persimm_map_t *src,
+                                        persimm_map_transient_t *transient);
 persimm_status persimm_map_transient_init(persimm_map_transient_t *transient,
                                           const persimm_entry_layout *layout,
                                           const persimm_elem_ops *value_ops, void *value_ctx,
@@ -257,7 +264,8 @@ persimm_status persimm_map_transient_dissoc(persimm_map_transient_t *transient,
 persimm_status persimm_map_transient_persist(persimm_map_transient_t *transient,
                                              persimm_map_t *dest);
 
-void persimm_set_to_transient(const persimm_set_t *src, persimm_set_transient_t *transient);
+persimm_status persimm_set_to_transient(const persimm_set_t *src,
+                                        persimm_set_transient_t *transient);
 persimm_status persimm_set_transient_init(persimm_set_transient_t *transient,
                                           size_t elem_size, const persimm_key_ops *key_ops,
                                           void *key_ctx);
@@ -280,9 +288,11 @@ persimm_status persimm_vector_init(persimm_vector_t *vector, size_t elem_size,
 
 /*
  * Points `dest` at the same storage as `src`, sharing its structure. `dest`
- * need not be initialised and must not be already, or its storage will leak.
+ * must be uninitialised and distinct from `src`. An alias is rejected without
+ * changing either argument.
  */
-void persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest);
+persimm_status persimm_vector_clone(const persimm_vector_t *src,
+                                    persimm_vector_t *dest);
 
 void persimm_vector_deinit(persimm_vector_t *vector);
 
@@ -336,10 +346,11 @@ persimm_status persimm_list_init(persimm_list_t *list, size_t elem_size,
                                  const persimm_elem_ops *ops, void *ctx);
 
 /*
- * Points `dest` at the same storage as `src`. `dest` need not be initialised and
- * must not be already, or its storage will leak.
+ * Points `dest` at the same storage as `src`. `dest` must be uninitialised and
+ * distinct from `src`. An alias is rejected without changing either argument.
  */
-void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest);
+persimm_status persimm_list_clone(const persimm_list_t *src,
+                                  persimm_list_t *dest);
 
 void persimm_list_deinit(persimm_list_t *list);
 
@@ -414,9 +425,10 @@ persimm_status persimm_map_init(persimm_map_t *map, const persimm_entry_layout *
 
 /*
  * Points `dest` at the same storage as `src`, sharing its structure. `dest`
- * need not be initialised and must not be already, or its storage will leak.
+ * must be uninitialised and distinct from `src`. An alias is rejected without
+ * changing either argument.
  */
-void persimm_map_clone(const persimm_map_t *src, persimm_map_t *dest);
+persimm_status persimm_map_clone(const persimm_map_t *src, persimm_map_t *dest);
 
 void persimm_map_deinit(persimm_map_t *map);
 
@@ -488,7 +500,11 @@ void persimm_map_trace(const persimm_map_t *map);
 persimm_status persimm_set_init(persimm_set_t *set, size_t elem_size,
                                 const persimm_key_ops *key_ops, void *key_ctx);
 
-void persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest);
+/*
+ * Points `dest` at the same storage as `src`. `dest` must be uninitialised and
+ * distinct from `src`. An alias is rejected without changing either argument.
+ */
+persimm_status persimm_set_clone(const persimm_set_t *src, persimm_set_t *dest);
 
 void persimm_set_deinit(persimm_set_t *set);
 
