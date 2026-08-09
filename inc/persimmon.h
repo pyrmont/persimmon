@@ -47,7 +47,12 @@ typedef struct {
     void (*trace)(const void *slot, void *ctx);
 } persimm_elem_ops;
 
-typedef void (*persimm_visit_fn)(const void *slot, size_t index, void *ctx);
+/*
+ * `position` starts at zero and increases by one in visitation order. It is an
+ * element index for a vector or list, but only a traversal ordinal for a map
+ * or set; it is not derived from a key and must not be used as one.
+ */
+typedef void (*persimm_visit_fn)(const void *slot, size_t position, void *ctx);
 
 /* Entries */
 
@@ -235,7 +240,9 @@ bool persimm_has_atomic_refcounts(void);
  * Persisting writes to an uninitialised destination and consumes the
  * transient. The destination must not be the transient's embedded collection;
  * that alias is rejected without consuming the transient. Deinitialising a
- * consumed transient is safe.
+ * consumed transient is safe. A pointer read through a transient's embedded
+ * collection is invalidated by its next successful mutation, persistence or
+ * deinitialisation.
  */
 persimm_status persimm_vector_to_transient(const persimm_vector_t *src,
                                            persimm_vector_transient_t *transient);
@@ -459,9 +466,10 @@ persimm_status persimm_map_dissoc(const persimm_map_t *src, const void *key,
                                   persimm_map_t *dest);
 
 /*
- * Visits each entry once. The order is not the order entries were stored in,
- * but it is the order persimm_map_next follows, and two maps holding the same
- * keys agree on it however they were built.
+ * Visits each entry once. The callback's position is a zero-based ordinal in
+ * this traversal, not a persistent index for the entry. The order is not the
+ * order entries were stored in, but it is the order persimm_map_next follows,
+ * and two maps holding the same keys agree on it however they were built.
  *
  * Keys whose hashes are equal in all 32 bits are the exception: they sit in
  * the order they arrived, and no order exists to sort opaque keys into. A host
@@ -472,8 +480,13 @@ void persimm_map_foreach(const persimm_map_t *map, persimm_visit_fn fn, void *ct
 
 /*
  * Returns the entry following `key`'s, the first entry when `key` is NULL, or
- * NULL at the end. Nothing is kept between calls, so a map shared in several
- * places can be walked from each of them at once.
+ * NULL when `key` is absent or the traversal is at its end. To walk a map,
+ * begin with NULL and pass each returned entry back as the next `key`. An entry
+ * can serve as its key because its key occupies its first bytes.
+ *
+ * Returned pointers are read-only and remain valid until `map` is
+ * deinitialised. Nothing is kept between calls, so several traversals of one
+ * map may be interleaved.
  */
 const void *persimm_map_next(const persimm_map_t *map, const void *key);
 
@@ -520,8 +533,23 @@ persimm_status persimm_set_conj(const persimm_set_t *src, const void *elem,
 persimm_status persimm_set_disj(const persimm_set_t *src, const void *elem,
                                 persimm_set_t *dest);
 
+/*
+ * Visits each element once in persimm_set_next order. The callback's position
+ * is a zero-based traversal ordinal, not a persistent index for the element.
+ * Sets holding the same elements agree on this order except where distinct
+ * elements have identical hashes, as maps do.
+ */
 void persimm_set_foreach(const persimm_set_t *set, persimm_visit_fn fn, void *ctx);
 
+/*
+ * Returns the element following `elem`, the first element when `elem` is NULL,
+ * or NULL when `elem` is absent or the traversal is at its end. To walk a set,
+ * begin with NULL and pass each returned element back to continue.
+ *
+ * Returned pointers are read-only and remain valid until `set` is
+ * deinitialised. Nothing is kept between calls, so several traversals of one
+ * set may be interleaved.
+ */
 const void *persimm_set_next(const persimm_set_t *set, const void *elem);
 
 void persimm_set_trace(const persimm_set_t *set);
