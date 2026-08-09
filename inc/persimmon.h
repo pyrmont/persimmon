@@ -8,17 +8,11 @@
 /*
  * Persimmon is a host-agnostic implementation of persistent immutable data
  * structures. It knows nothing about the language binding to it: elements are
- * opaque byte blobs of a fixed size, stored inline in the trie, and their
+ * opaque byte blobs of a fixed size, stored inline in the collection, and their
  * lifecycle is delegated to a table of callbacks supplied at initialisation.
  *
  * Elements must not require an alignment stricter than max_align_t.
  */
-
-/* Configuration */
-
-#define PERSIMM_BITS 5
-#define PERSIMM_WIDTH (1 << PERSIMM_BITS) // 2^5 = 32
-#define PERSIMM_MASK (PERSIMM_WIDTH - 1) // 31, or 0x1f
 
 /* Status Codes */
 
@@ -57,15 +51,10 @@ typedef void (*persimm_visit_fn)(void *slot, size_t index, void *ctx);
 /* Entries */
 
 /*
- * A map's elements are entries: a key followed by a value. The host lays the
- * entry out and describes it here rather than letting the core compute it,
- * because a core that placed the value itself would have to pad the key to
- * max_align_t. On a target where that is 16 bytes and a key is 8, every entry
- * would then cost twice what the host's own struct costs.
- *
- * The key occupies the first `key_size` bytes, so a pointer to an entry is
- * also a pointer to its key. `value_size` is zero for a set, whose entries are
- * keys and nothing more.
+ * A map's elements are entries containing a key and a value. The host lays an
+ * entry out and describes its exact representation here. The key occupies the
+ * first `key_size` bytes, so a pointer to an entry is also a pointer to its key.
+ * `value_size` is zero for a set, whose entries are keys and nothing more.
  */
 typedef struct {
     size_t entry_size;   // the stride from one entry to the next
@@ -91,18 +80,14 @@ typedef struct {
 
 /* Types */
 
-typedef struct persimm_vector_node persimm_vector_node_t;
-typedef struct persimm_list_cell persimm_list_cell_t;
-typedef struct persimm_hamt_node persimm_hamt_node_t;
-
 /*
  * In each structure below, fields are readable by the host (`count` in
  * particular) but must only be written through the functions that follow.
  */
 
 /*
- * A bit-partitioned trie of PERSIMM_WIDTH-way nodes with a tail buffer.
- * Indexing and appending are effectively constant time.
+ * A persistent indexed sequence. Indexing and appending are effectively
+ * constant time.
  */
 typedef struct {
     size_t shift;
@@ -111,13 +96,13 @@ typedef struct {
     size_t elem_size;
     const persimm_elem_ops *ops;
     void *ctx;
-    persimm_vector_node_t *root;
-    persimm_vector_node_t *tail;
+    struct persimm_vector_node *root;
+    struct persimm_vector_node *tail;
 } persimm_vector_t;
 
 /*
- * A singly linked chain of cells. Consing and taking the rest are constant
- * time whatever the length; indexing is linear.
+ * A persistent sequence optimised for access and updates at the front.
+ * Consing and taking the rest are constant time; indexing is linear.
  */
 typedef struct {
     size_t count;
@@ -126,7 +111,7 @@ typedef struct {
     size_t elem_size;
     const persimm_elem_ops *ops;
     void *ctx;
-    persimm_list_cell_t *head;
+    struct persimm_list_cell *head;
 } persimm_list_t;
 
 /*
@@ -139,26 +124,21 @@ typedef struct {
  * what the atomic reference counts exist to avoid. A host that shares a list
  * across threads gives each thread its own cursor.
  *
- * Treat the fields as opaque. A cursor is safe to point at any list, or at a
- * list that has since changed: it notices the structural generation and starts
- * again from the head.
+ * The fields are reserved for library bookkeeping and must not be modified. A
+ * cursor is safe to point at any list, or at a list that has since changed: it
+ * notices the structural generation and starts again from the head.
  */
 typedef struct {
     const persimm_list_t *list;
     size_t generation;
     size_t index;
-    persimm_list_cell_t *cell;
+    struct persimm_list_cell *cell;
 } persimm_list_cursor_t;
 
 /*
- * A CHAMP trie, which is a hash array mapped trie whose nodes carry one bitmap
- * for the slots holding an entry and another for the slots holding a child.
- * Looking a key up, storing one and dropping one are all effectively constant
- * time.
- *
- * A trie is kept in canonical form, so two maps holding the same entries have
- * the same shape however they were built, and therefore iterate in the same
- * order and hash alike.
+ * A persistent hash map. Looking a key up, storing one and dropping one are
+ * all effectively constant time. Two maps holding the same entries iterate in
+ * the same order except where distinct keys have identical hashes.
  */
 typedef struct {
     size_t count;
@@ -166,12 +146,12 @@ typedef struct {
     const persimm_elem_ops *ops;
     const persimm_key_ops *key_ops;
     void *ctx;
-    persimm_hamt_node_t *root;
+    struct persimm_hamt_node *root;
 } persimm_map_t;
 
 /*
- * The same trie over entries that are keys and nothing else. A set is to a map
- * what a map with no values would be, and shares its whole implementation.
+ * A persistent hash set, equivalent in behaviour to a map with keys and no
+ * values.
  */
 typedef struct {
     size_t count;
@@ -179,7 +159,7 @@ typedef struct {
     const persimm_elem_ops *ops;
     const persimm_key_ops *key_ops;
     void *ctx;
-    persimm_hamt_node_t *root;
+    struct persimm_hamt_node *root;
 } persimm_set_t;
 
 /*
@@ -188,8 +168,8 @@ typedef struct {
  * may then reuse the path for later edits. Persisting consumes it: every later
  * edit or second attempt to persist returns PERSIMM_ERR_INVALID.
  *
- * Treat every field as opaque. Transients are uniquely owned and must not be
- * shared between threads.
+ * The fields are reserved for library bookkeeping and must not be modified.
+ * Transients are uniquely owned and must not be shared between threads.
  */
 typedef struct {
     persimm_vector_t value;
@@ -209,10 +189,10 @@ typedef struct {
 /* Reference Counting */
 
 /*
- * Nodes and cells are shared between structures and their reference counts are
- * atomic where the toolchain provides atomics. This returns whether that was
- * the case for this build: when it is false, a graph of structures must not be
- * shared across threads.
+ * Internal storage is shared between structures and reference counted. The
+ * counts are atomic where the toolchain provides atomics. This returns whether
+ * that was the case for this build: when it is false, a graph of structures
+ * must not be shared across threads.
  */
 bool persimm_has_atomic_refcounts(void);
 
@@ -285,8 +265,8 @@ persimm_status persimm_vector_init(persimm_vector_t *vector, size_t elem_size,
                                    const persimm_elem_ops *ops, void *ctx);
 
 /*
- * Points `dest` at the same nodes as `src`, sharing their structure. `dest`
- * need not be initialised and must not be already, or its nodes will leak.
+ * Points `dest` at the same storage as `src`, sharing its structure. `dest`
+ * need not be initialised and must not be already, or its storage will leak.
  */
 void persimm_vector_clone(const persimm_vector_t *src, persimm_vector_t *dest);
 
@@ -295,7 +275,8 @@ void persimm_vector_deinit(persimm_vector_t *vector);
 /*
  * Returns a pointer to the storage slot for `index`, or NULL if the index is
  * out of bounds. The pointer is invalidated by any subsequent operation on any
- * vector sharing that node, so copy the value out rather than holding on to it.
+ * vector sharing that storage, so copy the value out rather than holding on to
+ * it.
  */
 void *persimm_vector_ref(const persimm_vector_t *vector, size_t index);
 
@@ -322,7 +303,7 @@ persimm_status persimm_vector_update(const persimm_vector_t *src, size_t index,
                                      const void *elem, persimm_vector_t *dest);
 
 /*
- * Walks the trie once, in index order, calling `fn` with each element's slot.
+ * Visits each element once, in index order.
  */
 void persimm_vector_foreach(const persimm_vector_t *vector, persimm_visit_fn fn, void *ctx);
 
@@ -342,8 +323,8 @@ persimm_status persimm_list_init(persimm_list_t *list, size_t elem_size,
                                  const persimm_elem_ops *ops, void *ctx);
 
 /*
- * Points `dest` at the same chain as `src`. `dest` need not be initialised and
- * must not be already, or its cells will leak.
+ * Points `dest` at the same storage as `src`. `dest` need not be initialised and
+ * must not be already, or its storage will leak.
  */
 void persimm_list_clone(const persimm_list_t *src, persimm_list_t *dest);
 
@@ -418,8 +399,8 @@ persimm_status persimm_map_init(persimm_map_t *map, const persimm_entry_layout *
                                 void *ctx);
 
 /*
- * Points `dest` at the same trie as `src`, sharing its nodes. `dest` need not
- * be initialised and must not be already, or its nodes will leak.
+ * Points `dest` at the same storage as `src`, sharing its structure. `dest`
+ * need not be initialised and must not be already, or its storage will leak.
  */
 void persimm_map_clone(const persimm_map_t *src, persimm_map_t *dest);
 
@@ -460,9 +441,9 @@ persimm_status persimm_map_dissoc(const persimm_map_t *src, const void *key,
                                   persimm_map_t *dest);
 
 /*
- * Walks the trie once, calling `fn` with each entry. The order is not the
- * order entries were stored in, but it is the order persimm_map_next follows,
- * and two maps holding the same keys agree on it however they were built.
+ * Visits each entry once. The order is not the order entries were stored in,
+ * but it is the order persimm_map_next follows, and two maps holding the same
+ * keys agree on it however they were built.
  *
  * Keys whose hashes are equal in all 32 bits are the exception: they sit in
  * the order they arrived, and no order exists to sort opaque keys into. A host

@@ -4,6 +4,18 @@
 #include <string.h>
 #include "../inc/persimmon.h"
 
+/* Trie Geometry */
+
+#define PERSIMM_BITS 5
+#define PERSIMM_WIDTH (1 << PERSIMM_BITS) /* 2^5 = 32 */
+#define PERSIMM_MASK (PERSIMM_WIDTH - 1) /* 31, or 0x1f */
+
+/* Private Types */
+
+typedef struct persimm_vector_node persimm_vector_node_t;
+typedef struct persimm_list_cell persimm_list_cell_t;
+typedef struct persimm_hamt_node persimm_hamt_node_t;
+
 /* Allocation */
 
 /* Core-only tests replace allocation so that every failure path can be
