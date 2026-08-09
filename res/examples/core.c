@@ -30,7 +30,7 @@ int main(void) {
 
     printf("first: %zu, result:", first.count);
     for (size_t i = 0; i < result.count; i++) {
-        printf(" %d", *(const int *)persimm_vector_ref(&result, i));
+        printf(" %d", *(const int *)persimm_vector_at(&result, i));
     }
     printf("\n");
 

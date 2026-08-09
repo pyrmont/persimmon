@@ -116,23 +116,23 @@ void persimm_map_deinit(persimm_map_t *map) {
 
 /* Accessing */
 
-const void *persimm_map_ref_entry(const persimm_map_t *map, const void *key) {
+const void *persimm_map_find_entry(const persimm_map_t *map, const void *key) {
     persimm_hamt_t hamt;
     persimm_map_hamt(map, &hamt);
     return persimm_hamt_ref(map->root, key, &hamt);
 }
 
-const void *persimm_map_ref(const persimm_map_t *map, const void *key) {
+const void *persimm_map_find(const persimm_map_t *map, const void *key) {
     if (0 == map->layout.value_size) return NULL;
 
-    const void *entry = persimm_map_ref_entry(map, key);
+    const void *entry = persimm_map_find_entry(map, key);
     if (NULL == entry) return NULL;
 
     return (const unsigned char *)entry + map->layout.value_offset;
 }
 
 bool persimm_map_has(const persimm_map_t *map, const void *key) {
-    return NULL != persimm_map_ref_entry(map, key);
+    return NULL != persimm_map_find_entry(map, key);
 }
 
 /* Inserting */

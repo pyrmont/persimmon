@@ -131,7 +131,7 @@ typedef struct {
 } persimm_list_t;
 
 /*
- * A resumable position in a list, owned by the host. persimm_list_ref_from
+ * A resumable position in a list, owned by the host. persimm_list_at_from
  * walks forward from one rather than from the head, which is what turns a
  * front-to-back traversal from quadratic into linear.
  *
@@ -301,7 +301,7 @@ void persimm_vector_deinit(persimm_vector_t *vector);
  * index is out of bounds. The pointer remains valid until `vector` is
  * deinitialised.
  */
-const void *persimm_vector_ref(const persimm_vector_t *vector, size_t index);
+const void *persimm_vector_at(const persimm_vector_t *vector, size_t index);
 
 /*
  * Appends `elem` to `src`, placing the resulting persistent vector in `dest`.
@@ -359,7 +359,7 @@ const void *persimm_list_first(const persimm_list_t *list);
  * index is out of bounds. The pointer remains valid until `list` is
  * deinitialised. This walks from the head, so it is linear in `index`.
  */
-const void *persimm_list_ref(const persimm_list_t *list, size_t index);
+const void *persimm_list_at(const persimm_list_t *list, size_t index);
 
 /*
  * Puts a cursor back into its initial state, from which it walks from the
@@ -369,14 +369,14 @@ const void *persimm_list_ref(const persimm_list_t *list, size_t index);
 void persimm_list_cursor_reset(persimm_list_cursor_t *cursor);
 
 /*
- * As persimm_list_ref, but resumes from `cursor` when it belongs to this list
+ * As persimm_list_at, but resumes from `cursor` when it belongs to this list
  * and sits at or before `index`, and leaves it pointing at what was returned.
  * Walking a list from front to back this way costs one step per element.
  * Indices that go backwards are answered from the head, and so cost no more
- * than persimm_list_ref would.
+ * than persimm_list_at would.
  */
-const void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
-                                  size_t index);
+const void *persimm_list_at_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
+                                 size_t index);
 
 /*
  * Prepends `elem` to `src`, leaving it unchanged and placing the resulting
@@ -432,7 +432,7 @@ void persimm_map_deinit(persimm_map_t *map);
  * A map whose entries have no value has nothing to return, so ask
  * persimm_map_has instead.
  */
-const void *persimm_map_ref(const persimm_map_t *map, const void *key);
+const void *persimm_map_find(const persimm_map_t *map, const void *key);
 
 /*
  * Returns the whole entry rather than its value, which is what a host wants
@@ -440,7 +440,7 @@ const void *persimm_map_ref(const persimm_map_t *map, const void *key);
  * up with. Storing a key that already has an equal counterpart leaves the
  * earlier one in place.
  */
-const void *persimm_map_ref_entry(const persimm_map_t *map, const void *key);
+const void *persimm_map_find_entry(const persimm_map_t *map, const void *key);
 
 bool persimm_map_has(const persimm_map_t *map, const void *key);
 
@@ -506,7 +506,7 @@ void persimm_set_deinit(persimm_set_t *set);
  * interning values through a set is after. The pointer remains valid until
  * `set` is deinitialised.
  */
-const void *persimm_set_ref(const persimm_set_t *set, const void *elem);
+const void *persimm_set_find(const persimm_set_t *set, const void *elem);
 
 bool persimm_set_has(const persimm_set_t *set, const void *elem);
 

@@ -361,7 +361,7 @@ static int janet_persimm_vector_mark(void *p, size_t size) {
 }
 
 static Janet janet_persimm_vector_at(persimm_vector_t *vector, size_t index) {
-    const void *slot = persimm_vector_ref(vector, index);
+    const void *slot = persimm_vector_at(vector, index);
     if (NULL == slot) janet_panic("invalid index");
     return *(const Janet *)slot;
 }
@@ -441,8 +441,8 @@ static int janet_persimm_vector_compare(void *p1, void *p2) {
     size_t shared = (a->count < b->count) ? a->count : b->count;
 
     for (size_t i = 0; i < shared; i++) {
-        int order = janet_compare(*(const Janet *)persimm_vector_ref(a, i),
-                                  *(const Janet *)persimm_vector_ref(b, i));
+        int order = janet_compare(*(const Janet *)persimm_vector_at(a, i),
+                                  *(const Janet *)persimm_vector_at(b, i));
         if (0 != order) return order;
     }
 
@@ -526,7 +526,7 @@ static int janet_persimm_list_get(void *p, Janet key, Janet *out) {
     size_t index;
     if (!janet_persimm_index(wrapper->list.count, key, &index)) return 0;
 
-    const void *slot = persimm_list_ref_from(&wrapper->list, &wrapper->cursor, index);
+    const void *slot = persimm_list_at_from(&wrapper->list, &wrapper->cursor, index);
     if (NULL == slot) janet_panic("invalid index");
 
     *out = *(const Janet *)slot;
@@ -589,8 +589,8 @@ static int janet_persimm_list_compare(void *p1, void *p2) {
 
     for (size_t i = 0; i < shared; i++) {
         int order = janet_compare(
-            *(const Janet *)persimm_list_ref_from(&a->list, &a->cursor, i),
-            *(const Janet *)persimm_list_ref_from(&b->list, &b->cursor, i));
+            *(const Janet *)persimm_list_at_from(&a->list, &a->cursor, i),
+            *(const Janet *)persimm_list_at_from(&b->list, &b->cursor, i));
         if (0 != order) return order;
     }
 
@@ -679,7 +679,7 @@ static int janet_persimm_map_get(void *p, Janet key, Janet *out) {
     persimm_map_t *map = (persimm_map_t *)p;
 
     if (!janet_checktype(key, JANET_NIL)) {
-        const void *value = persimm_map_ref(map, &key);
+        const void *value = persimm_map_find(map, &key);
         if (NULL != value) {
             *out = *(const Janet *)value;
             return 1;
@@ -767,7 +767,7 @@ static int janet_persimm_map_compare(void *p1, void *p2) {
          NULL != entry;
          entry = persimm_map_next(a, entry)) {
         const janet_persimm_entry_t *pair = (const janet_persimm_entry_t *)entry;
-        const void *value = persimm_map_ref(b, &pair->key);
+        const void *value = persimm_map_find(b, &pair->key);
         if (NULL == value) return janet_persimm_order_by_address(p1, p2);
         if (!janet_equals(pair->value, *(const Janet *)value)) {
             return janet_persimm_order_by_address(p1, p2);
@@ -844,7 +844,7 @@ static int janet_persimm_set_get(void *p, Janet key, Janet *out) {
     persimm_set_t *set = (persimm_set_t *)p;
 
     if (!janet_checktype(key, JANET_NIL)) {
-        const void *elem = persimm_set_ref(set, &key);
+        const void *elem = persimm_set_find(set, &key);
         if (NULL != elem) {
             *out = *(const Janet *)elem;
             return 1;
@@ -1048,7 +1048,7 @@ static int janet_persimm_map_transient_get(void *p, Janet key, Janet *out) {
     janet_persimm_require_active(transient->active);
     if (janet_checktype(key, JANET_NIL)) return 0;
 
-    const void *value = persimm_map_ref(&transient->value, &key);
+    const void *value = persimm_map_find(&transient->value, &key);
     if (NULL == value) return 0;
     *out = *(const Janet *)value;
     return 1;
@@ -1106,7 +1106,7 @@ static int janet_persimm_set_transient_get(void *p, Janet key, Janet *out) {
     janet_persimm_require_active(transient->active);
     if (janet_checktype(key, JANET_NIL)) return 0;
 
-    const void *elem = persimm_set_ref(&transient->value, &key);
+    const void *elem = persimm_set_find(&transient->value, &key);
     if (NULL == elem) return 0;
     *out = *(const Janet *)elem;
     return 1;

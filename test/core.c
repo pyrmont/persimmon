@@ -267,19 +267,19 @@ static void test_assoc_and_ref(const persimm_key_ops *ops, const char *label, in
     CHECK(map.count == (size_t)n, "%s: count is %zu, wanted %d", label, map.count, n);
 
     for (int i = 0; i < n; i++) {
-        const int *value = (const int *)persimm_map_ref(&map, &i);
-        CHECK(NULL != value && *value == i * 3, "%s: ref %d", label, i);
+        const int *value = (const int *)persimm_map_find(&map, &i);
+        CHECK(NULL != value && *value == i * 3, "%s: find %d", label, i);
     }
 
     int absent = n + 1;
-    CHECK(NULL == persimm_map_ref(&map, &absent), "%s: found a key it does not hold", label);
+    CHECK(NULL == persimm_map_find(&map, &absent), "%s: found a key it does not hold", label);
 
     /* Storing a key again replaces the value and leaves the count alone. */
     if (n > 0) {
         entry_t again = { 0, 999 };
         test_map_transient_assoc(&map, &again);
         CHECK(map.count == (size_t)n, "%s: replacing a value grew the count", label);
-        CHECK(999 == *(const int *)persimm_map_ref(&map, &again.key),
+        CHECK(999 == *(const int *)persimm_map_find(&map, &again.key),
               "%s: value not replaced", label);
     }
 
@@ -331,7 +331,7 @@ static void test_dissoc(const persimm_key_ops *ops, const char *label, int n) {
           map.count);
 
     for (int i = 0; i < n; i++) {
-        const void *value = persimm_map_ref(&map, &i);
+        const void *value = persimm_map_find(&map, &i);
         if (0 == i % 2) {
             CHECK(NULL == value, "%s: %d survived being dropped", label, i);
         } else {
@@ -429,7 +429,7 @@ static void test_sharing(const persimm_key_ops *ops, const char *label, int n) {
     test_map_advance_assoc(&added, &fresh);
 
     CHECK(base.count == (size_t)n, "%s: the original's count moved to %zu", label, base.count);
-    CHECK(NULL == persimm_map_ref(&base, &fresh.key), "%s: the original gained a key", label);
+    CHECK(NULL == persimm_map_find(&base, &fresh.key), "%s: the original gained a key", label);
     CHECK(added.count == (size_t)n + 1, "%s: the copy did not grow", label);
 
     int victim = n / 2;
@@ -438,18 +438,19 @@ static void test_sharing(const persimm_key_ops *ops, const char *label, int n) {
         test_map_advance_assoc(&replaced, &over);
         test_map_advance_dissoc(&dropped, &victim);
 
-        CHECK(victim == *(const int *)persimm_map_ref(&base, &victim),
+        CHECK(victim == *(const int *)persimm_map_find(&base, &victim),
               "%s: the original changed", label);
-        CHECK(-1 == *(const int *)persimm_map_ref(&replaced, &victim),
+        CHECK(-1 == *(const int *)persimm_map_find(&replaced, &victim),
               "%s: the copy did not", label);
-        CHECK(NULL == persimm_map_ref(&dropped, &victim), "%s: the copy kept a dropped key", label);
+        CHECK(NULL == persimm_map_find(&dropped, &victim),
+              "%s: the copy kept a dropped key", label);
         CHECK(replaced.count == (size_t)n, "%s: replacing on a copy grew it", label);
         CHECK(dropped.count == (size_t)n - 1, "%s: dropping on a copy did not shrink it", label);
     }
 
     for (int i = 0; i < n; i++) {
-        CHECK(NULL != persimm_map_ref(&base, &i), "%s: the original lost %d", label, i);
-        CHECK(NULL != persimm_map_ref(&added, &i), "%s: the copy lost %d", label, i);
+        CHECK(NULL != persimm_map_find(&base, &i), "%s: the original lost %d", label, i);
+        CHECK(NULL != persimm_map_find(&added, &i), "%s: the copy lost %d", label, i);
     }
 
     persimm_map_deinit(&added);
@@ -458,7 +459,7 @@ static void test_sharing(const persimm_key_ops *ops, const char *label, int n) {
 
     /* Whatever the copies shared has outlived every one of them. */
     for (int i = 0; i < n; i++) {
-        CHECK(NULL != persimm_map_ref(&base, &i), "%s: a copy took %d with it", label, i);
+        CHECK(NULL != persimm_map_find(&base, &i), "%s: a copy took %d with it", label, i);
     }
 
     persimm_map_deinit(&base);
@@ -615,7 +616,7 @@ static void test_map_refcounts(const persimm_key_ops *ops, const char *label, in
 
     for (int i = 0; i < n; i++) {
         CHECK(live[i] >= 1, "%s: key %d was released while the original held it", label, i);
-        const int *value = (const int *)persimm_map_ref(&base, &i);
+        const int *value = (const int *)persimm_map_find(&base, &i);
         CHECK(NULL != value && RC_VALUE_BASE + i == *value, "%s: the original lost %d", label, i);
     }
 
@@ -677,8 +678,8 @@ static void test_byte_defaults(void) {
     }
     CHECK(500 == map.count, "defaults: count is %zu", map.count);
     for (int i = 0; i < 500; i++) {
-        const int *value = (const int *)persimm_map_ref(&map, &i);
-        CHECK(NULL != value && i * 2 == *value, "defaults: ref %d", i);
+        const int *value = (const int *)persimm_map_find(&map, &i);
+        CHECK(NULL != value && i * 2 == *value, "defaults: find %d", i);
     }
 
     persimm_map_deinit(&map);
@@ -727,8 +728,8 @@ static void test_persistent_operation_contracts(void) {
           "contract: vector push changed its source");
     CHECK(PERSIMM_OK == persimm_vector_update(&pushed, 0, &two, &updated),
           "contract: vector update failed");
-    const int *pushed_value = (const int *)persimm_vector_ref(&pushed, 0);
-    const int *updated_value = (const int *)persimm_vector_ref(&updated, 0);
+    const int *pushed_value = (const int *)persimm_vector_at(&pushed, 0);
+    const int *updated_value = (const int *)persimm_vector_at(&updated, 0);
     CHECK(NULL != pushed_value && 1 == *pushed_value,
           "contract: vector update changed its source");
     CHECK(NULL != updated_value && 2 == *updated_value,
@@ -739,7 +740,7 @@ static void test_persistent_operation_contracts(void) {
           "contract: vector update accepted an aliased destination");
     CHECK(PERSIMM_ERR_INVALID == persimm_vector_clone(&pushed, &pushed),
           "contract: vector clone accepted an aliased destination");
-    CHECK(1 == pushed.count && 1 == *(const int *)persimm_vector_ref(&pushed, 0),
+    CHECK(1 == pushed.count && 1 == *(const int *)persimm_vector_at(&pushed, 0),
           "contract: rejected vector clone changed its source");
     persimm_vector_deinit(&updated);
     persimm_vector_deinit(&pushed);
@@ -914,14 +915,14 @@ static void test_cursor_survives_same_count_change(void) {
     test_list_advance_cons(&list, &tail);
     test_list_advance_cons(&list, &head);
 
-    const int *seen = (const int *)persimm_list_ref_from(&list, &cursor, 0);
+    const int *seen = (const int *)persimm_list_at_from(&list, &cursor, 0);
     CHECK(NULL != seen && 2 == *seen, "cursor: initial head was wrong");
 
     test_list_advance_rest(&list);
     test_list_advance_cons(&list, &replacement);
-    seen = (const int *)persimm_list_ref_from(&list, &cursor, 0);
+    seen = (const int *)persimm_list_at_from(&list, &cursor, 0);
     CHECK(NULL != seen && 3 == *seen, "cursor: reused a stale cell after rest and cons");
-    seen = (const int *)persimm_list_ref_from(&list, &cursor, 1);
+    seen = (const int *)persimm_list_at_from(&list, &cursor, 1);
     CHECK(NULL != seen && 1 == *seen, "cursor: stale traversal lost the tail");
 
     persimm_list_deinit(&list);
@@ -935,7 +936,7 @@ static void test_replacement_may_alias_storage(void) {
     int value = 17;
     persimm_vector_init(&vector, sizeof(value), &rc_ops, NULL);
     test_vector_transient_push(&vector, &value);
-    const void *stored = persimm_vector_ref(&vector, 0);
+    const void *stored = persimm_vector_at(&vector, 0);
     CHECK(PERSIMM_OK == test_vector_transient_update(&vector, 0, stored),
           "alias: vector rejected its stored element");
     CHECK(1 == live[value] && 0 == rc_underflows,
@@ -947,7 +948,7 @@ static void test_replacement_may_alias_storage(void) {
     persimm_key_ops managed_keys = rc_key_ops(&spread_ops);
     persimm_map_init(&map, &map_layout, &rc_ops, NULL, &managed_keys, NULL);
     test_map_transient_assoc(&map, &entry);
-    stored = persimm_map_ref_entry(&map, &entry.key);
+    stored = persimm_map_find_entry(&map, &entry.key);
     CHECK(PERSIMM_OK == test_map_transient_assoc(&map, stored),
           "alias: map rejected its stored entry");
     CHECK(1 == live[entry.key] && 1 == live[entry.value] && 0 == rc_underflows,
@@ -1001,13 +1002,13 @@ static void test_vector_transient(void) {
           "transient vector: update failed");
     CHECK(PERSIMM_OK == persimm_vector_transient_push(&transient, &fresh),
           "transient vector: push failed");
-    CHECK(10 == *(const int *)persimm_vector_ref(&base, 10) && 100 == base.count,
+    CHECK(10 == *(const int *)persimm_vector_at(&base, 10) && 100 == base.count,
           "transient vector: original changed");
 
     persimm_vector_t result;
     CHECK(PERSIMM_OK == persimm_vector_transient_persist(&transient, &result),
           "transient vector: persist failed");
-    CHECK(101 == result.count && -1 == *(const int *)persimm_vector_ref(&result, 10),
+    CHECK(101 == result.count && -1 == *(const int *)persimm_vector_at(&result, 10),
           "transient vector: result is wrong");
     CHECK(PERSIMM_ERR_INVALID == persimm_vector_transient_push(&transient, &fresh),
           "transient vector: accepted an edit after persist");
@@ -1045,14 +1046,14 @@ static void test_map_transient(void) {
           "transient map: replacement failed");
     CHECK(PERSIMM_OK == persimm_map_transient_assoc(&transient, &fresh),
           "transient map: assoc failed");
-    CHECK(100 == base.count && NULL != persimm_map_ref(&base, &victim),
+    CHECK(100 == base.count && NULL != persimm_map_find(&base, &victim),
           "transient map: original changed");
 
     persimm_map_t result;
     CHECK(PERSIMM_OK == persimm_map_transient_persist(&transient, &result),
           "transient map: persist failed");
-    CHECK(100 == result.count && NULL == persimm_map_ref(&result, &victim) &&
-          NULL != persimm_map_ref(&result, &fresh.key),
+    CHECK(100 == result.count && NULL == persimm_map_find(&result, &victim) &&
+          NULL != persimm_map_find(&result, &fresh.key),
           "transient map: result is wrong");
     CHECK(PERSIMM_ERR_INVALID == persimm_map_transient_assoc(&transient, &fresh),
           "transient map: accepted an edit after persist");

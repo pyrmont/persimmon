@@ -207,7 +207,7 @@ persimm_status persimm_vector_transient_persist(persimm_vector_transient_t *tran
 
 /* Accessing */
 
-const void *persimm_vector_ref(const persimm_vector_t *vector, size_t index) {
+const void *persimm_vector_at(const persimm_vector_t *vector, size_t index) {
     if (index >= vector->count) return NULL;
 
     size_t tail_offset = vector->count - vector->tail_count;

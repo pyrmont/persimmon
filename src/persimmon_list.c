@@ -91,7 +91,7 @@ const void *persimm_list_first(const persimm_list_t *list) {
     return persimm_list_cell_slot(list->head);
 }
 
-const void *persimm_list_ref(const persimm_list_t *list, size_t index) {
+const void *persimm_list_at(const persimm_list_t *list, size_t index) {
     if (index >= list->count) return NULL;
 
     persimm_list_cell_t *cell = list->head;
@@ -111,8 +111,8 @@ void persimm_list_cursor_reset(persimm_list_cursor_t *cursor) {
     cursor->cell = NULL;
 }
 
-const void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
-                                  size_t index) {
+const void *persimm_list_at_from(const persimm_list_t *list, persimm_list_cursor_t *cursor,
+                                 size_t index) {
     if (index >= list->count) return NULL;
 
     persimm_list_cell_t *cell = list->head;

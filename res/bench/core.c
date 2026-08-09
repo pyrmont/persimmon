@@ -94,7 +94,7 @@ static void benchmark_list(void) {
     persimm_list_cursor_reset(&cursor);
     start = clock();
     for (size_t i = 0; i < count; i++) {
-        const int *value = (const int *)persimm_list_ref_from(&list, &cursor, i);
+        const int *value = (const int *)persimm_list_at_from(&list, &cursor, i);
         if (NULL == value) {
             fprintf(stderr, "list cursor returned NULL\n");
             exit(1);
@@ -131,14 +131,14 @@ static void benchmark_vector(void) {
 
     start = clock();
     for (size_t i = 0; i < count; i++) {
-        const int *value = (const int *)persimm_vector_ref(&vector, i);
+        const int *value = (const int *)persimm_vector_at(&vector, i);
         if (NULL == value) {
-            fprintf(stderr, "vector ref returned NULL\n");
+            fprintf(stderr, "vector at returned NULL\n");
             exit(1);
         }
         sink += (uint32_t)*value;
     }
-    report("vector sequential ref", count, seconds_since(start));
+    report("vector sequential at", count, seconds_since(start));
     persimm_vector_deinit(&vector);
 
     count = scaled(150000);
@@ -186,14 +186,14 @@ static void benchmark_map(void) {
     start = clock();
     for (size_t i = 0; i < count; i++) {
         int key = (int)i;
-        const int *value = (const int *)persimm_map_ref(&map, &key);
+        const int *value = (const int *)persimm_map_find(&map, &key);
         if (NULL == value) {
-            fprintf(stderr, "map ref returned NULL\n");
+            fprintf(stderr, "map find returned NULL\n");
             exit(1);
         }
         sink += (uint32_t)*value;
     }
-    report("map sequential ref", count, seconds_since(start));
+    report("map sequential find", count, seconds_since(start));
     persimm_map_deinit(&map);
 
     count = scaled(75000);

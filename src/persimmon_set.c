@@ -112,14 +112,14 @@ void persimm_set_deinit(persimm_set_t *set) {
 
 /* Accessing */
 
-const void *persimm_set_ref(const persimm_set_t *set, const void *elem) {
+const void *persimm_set_find(const persimm_set_t *set, const void *elem) {
     persimm_hamt_t hamt;
     persimm_set_hamt(set, &hamt);
     return persimm_hamt_ref(set->root, elem, &hamt);
 }
 
 bool persimm_set_has(const persimm_set_t *set, const void *elem) {
-    return NULL != persimm_set_ref(set, elem);
+    return NULL != persimm_set_find(set, elem);
 }
 
 /* Inserting */
