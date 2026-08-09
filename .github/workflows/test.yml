@@ -53,6 +53,11 @@ jobs:
       shell: bash
     - name: "run tests"
       run: 'for f in test/*.janet; do janet "$f" || { rc=$?; break; }; done; (exit ${rc:-0})'
+      # The core checks in test/core.c are compiled and run by
+      # test/core.janet. Linux builds them with the address and undefined
+      # behaviour sanitisers; the other runners build them plain.
+      env:
+        PERSIMMON_SANITISE: 1
       shell: bash
 
   # macOS

@@ -10,6 +10,8 @@ with a binding for the [Janet][] programming language.
 
 [Janet]: https://janet-lang.org
 
+## Implementation
+
 A persistent data structure is never modified. An operation that would change
 it returns a new structure instead, and the two share as much of their
 internal representation as they can.
@@ -21,29 +23,25 @@ internal representation as they can.
 | Map       | 32-way CHAMP hash array mapped trie   | lookup, store, remove |
 | Set       | The same trie over keys alone         | lookup, add, remove   |
 
-The vector is a trie of the kind Clojure popularised: 32 items to a node,
-with a tail buffer so that repeated appends usually touch nothing but the
-last node. The list is a cons list, so two lists share every cell from their
-first common element onwards and prepending costs one cell however long the
-list is.
+The vector is a trie of the kind Clojure popularised: 32 items to a node, with
+a tail buffer so that repeated appends usually touch nothing but the last node.
 
-Indexing a list is linear, as it is in Clojure. Iterating one is not: each
-list keeps a cursor that lets a read resume from where the last one stopped,
-so walking a list front to back costs one step per element. An index behind
-the cursor, or into a different list, simply starts again from the head.
+The list is a cons list, so two lists share every cell from their first common
+element onwards and prepending costs one cell however long the list is.
+Indexing a list is linear. Iterating one is not: each list keeps a cursor that
+lets a read resume from where the last one stopped, so walking a list front to
+back costs one step per element. An index behind the cursor, or into a
+different list, simply starts again from the head.
 
-The map is a CHAMP trie rather than the shape Clojure uses. Five bits of a
-key's hash choose a slot at each level, and a node carries two bitmaps: one
-for the slots holding an entry and one for the slots holding a child.
-Clojure tells those apart with a null in the key half of a pair, which is not
-open to a core whose keys are opaque bytes.
-
-The second bitmap also keeps a trie in canonical form, so two maps holding
-the same keys have the same shape however they were built. They therefore
-iterate in the same order, and a map that reached its contents by adding and
-removing entries is indistinguishable from one handed them outright. Keys
-whose hashes agree in all 32 bits are the exception: they share a collision
-node and sit in the order they arrived.
+The map is a compressed hash-array mapped prefix-tree (i.e. CHAMP) trie. Five
+bits of a key's hash choose a slot at each level, and a node carries two
+bitmaps: one for the slots holding an entry and one for the slots holding a
+child. The second bitmap also keeps a trie in canonical form, so two maps
+holding the same keys have the same shape however they were built. They
+therefore iterate in the same order, and a map that reached its contents by
+adding and removing entries is indistinguishable from one handed them outright.
+Keys whose hashes agree in all 32 bits are the exception: they share a
+collision node and sit in the order they arrived.
 
 A set is the same trie over entries that are keys and nothing else, so the
 two share their whole implementation.
@@ -80,6 +78,11 @@ whether that was the case for a given build. Where it returns false, a graph
 of structures must not be shared across threads.
 
 ## Installation
+
+The repository includes a Janet wrapper as an example of how Persimmon can be
+integrated into another language.
+
+### Janet
 
 Add the dependency to your `info.jdn` file:
 
@@ -176,6 +179,27 @@ $ jeep test
 ```
 
 [Jeep]: https://github.com/pyrmont/jeep
+
+Most of the tests exercise the Janet binding, but `test/core.janet` compiles
+`test/core.c` against the core alone and runs what comes out. Those checks
+cover the two things the binding cannot reach. The first is collision nodes,
+which only appear for keys whose hashes agree in all 32 bits and so need a
+hash that collides to order. The second is `retain` and `release`, which
+Janet never calls because it traces instead, leaving everything a reference
+counting host depends on otherwise untested.
+
+Building those checks at all is worth something on its own: they include no
+Janet header, so the core failing to be host-agnostic is a link error.
+
+Set `PERSIMMON_SANITISE` to build them with the address and undefined
+behaviour sanitisers, which is what the Linux job in CI does:
+
+```console
+$ PERSIMMON_SANITISE=1 jeep test
+```
+
+The checks are skipped, with a notice, where no C compiler can be found. Set
+`CC` to name one.
 
 ## Bugs
 
