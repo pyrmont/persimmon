@@ -62,9 +62,14 @@ typedef void (*persimm_visit_fn)(const void *slot, size_t position, void *ctx);
 
 /*
  * A map's elements are entries containing a key and a value. The host lays an
- * entry out and describes its exact representation here. The key occupies the
- * first `key_size` bytes, so a pointer to an entry is also a pointer to its key.
- * `value_size` is zero for a set, whose entries are keys and nothing more.
+ * entry out and describes its exact representation here rather than letting
+ * the core compute it, because a core that placed the value itself would have
+ * to pad the key to max_align_t. On a target where that is 16 bytes and a key
+ * is 8, every entry would then cost twice what the host's own struct costs.
+ *
+ * The key occupies the first `key_size` bytes, so a pointer to an entry is
+ * also a pointer to its key. `value_size` is zero for a set, whose entries are
+ * keys and nothing more.
  *
  * `entry_size` must preserve the entry's alignment from one inline slot to the
  * next, and `value_offset` must satisfy the value's alignment. Using
