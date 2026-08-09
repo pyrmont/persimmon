@@ -14,6 +14,11 @@ static void persimm_map_hamt(const persimm_map_t *map, persimm_hamt_t *hamt) {
     persimm_hamt_config(hamt, &map->layout, map->ops, map->key_ops, map->ctx);
 }
 
+static persimm_status persimm_map_assoc_in_place(persimm_map_t *map, const void *entry,
+                                                 bool immutable);
+static persimm_status persimm_map_dissoc_in_place(persimm_map_t *map, const void *key,
+                                                  bool immutable);
+
 /* Initialising */
 
 persimm_status persimm_map_init(persimm_map_t *map, const persimm_entry_layout *layout,
@@ -39,6 +44,52 @@ void persimm_map_clone(const persimm_map_t *src, persimm_map_t *dest) {
     dest->ctx = src->ctx;
     dest->root = src->root;
     persimm_hamt_retain(dest->root);
+}
+
+/* Transients */
+
+void persimm_map_to_transient(const persimm_map_t *src, persimm_map_transient_t *transient) {
+    persimm_map_clone(src, &transient->value);
+    transient->active = true;
+}
+
+persimm_status persimm_map_transient_init(persimm_map_transient_t *transient,
+                                          const persimm_entry_layout *layout,
+                                          const persimm_elem_ops *ops,
+                                          const persimm_key_ops *key_ops, void *ctx) {
+    persimm_status status = persimm_map_init(&transient->value, layout, ops, key_ops, ctx);
+    transient->active = PERSIMM_OK == status;
+    return status;
+}
+
+void persimm_map_transient_deinit(persimm_map_transient_t *transient) {
+    persimm_map_deinit(&transient->value);
+    transient->active = false;
+}
+
+persimm_status persimm_map_transient_assoc(persimm_map_transient_t *transient,
+                                           const void *entry) {
+    if (!transient->active) return PERSIMM_ERR_INVALID;
+    return persimm_map_assoc_in_place(&transient->value, entry, false);
+}
+
+persimm_status persimm_map_transient_dissoc(persimm_map_transient_t *transient,
+                                            const void *key) {
+    if (!transient->active) return PERSIMM_ERR_INVALID;
+    return persimm_map_dissoc_in_place(&transient->value, key, false);
+}
+
+persimm_status persimm_map_transient_persist(persimm_map_transient_t *transient,
+                                             persimm_map_t *dest) {
+    if (!transient->active) {
+        memset(dest, 0, sizeof(*dest));
+        return PERSIMM_ERR_INVALID;
+    }
+
+    *dest = transient->value;
+    memset(&transient->value, 0, sizeof(transient->value));
+    transient->active = false;
+    return PERSIMM_OK;
 }
 
 /* Deinitialising */
@@ -74,7 +125,8 @@ bool persimm_map_has(const persimm_map_t *map, const void *key) {
 
 /* Inserting */
 
-persimm_status persimm_map_assoc(persimm_map_t *map, const void *entry, bool immutable) {
+static persimm_status persimm_map_assoc_in_place(persimm_map_t *map, const void *entry,
+                                                 bool immutable) {
     persimm_hamt_t hamt;
     persimm_map_hamt(map, &hamt);
 
@@ -89,7 +141,8 @@ persimm_status persimm_map_assoc(persimm_map_t *map, const void *entry, bool imm
 
 /* Removing */
 
-persimm_status persimm_map_dissoc(persimm_map_t *map, const void *key, bool immutable) {
+static persimm_status persimm_map_dissoc_in_place(persimm_map_t *map, const void *key,
+                                                  bool immutable) {
     persimm_hamt_t hamt;
     persimm_map_hamt(map, &hamt);
 
@@ -100,6 +153,24 @@ persimm_status persimm_map_dissoc(persimm_map_t *map, const void *key, bool immu
     if (removed) map->count--;
 
     return PERSIMM_OK;
+}
+
+persimm_status persimm_map_assoc(const persimm_map_t *src, const void *entry,
+                                 persimm_map_t *dest) {
+    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
+    persimm_map_clone(src, dest);
+    persimm_status status = persimm_map_assoc_in_place(dest, entry, true);
+    if (PERSIMM_OK != status) persimm_map_deinit(dest);
+    return status;
+}
+
+persimm_status persimm_map_dissoc(const persimm_map_t *src, const void *key,
+                                  persimm_map_t *dest) {
+    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
+    persimm_map_clone(src, dest);
+    persimm_status status = persimm_map_dissoc_in_place(dest, key, true);
+    if (PERSIMM_OK != status) persimm_map_deinit(dest);
+    return status;
 }
 
 /* Traversing */

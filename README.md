@@ -137,6 +137,22 @@ Add the dependency to your `info.jdn` file:
 As in Clojure, `conj` adds an element wherever the structure takes one most
 cheaply — the end of a vector, the front of a list, anywhere in a set.
 
+Vectors, maps and sets can also be changed in a transient when several edits
+belong to one operation. The transient is mutable and uniquely owned; turning
+it persistent consumes it, and any later attempt to use it is an error:
+
+```janet
+(def t (persimmon/transient (persimmon/vec)))
+(for i 0 1000
+  (persimmon/conj! t i))
+(def settled (persimmon/persistent! t))
+```
+
+The `!` operations return the transient they receive. Transients support
+`length`, `get` and iteration while active, but cannot be compared, hashed or
+marshalled. Lists have no transient form: consing already costs one new cell
+and never copies the chain it shares.
+
 | Function                       | Result                                       |
 | ------------------------------ | -------------------------------------------- |
 | `(persimmon/vec &opt coll)`    | a vector, optionally seeded from an indexed  |
@@ -147,6 +163,12 @@ cheaply — the end of a vector, the front of a list, anywhere in a set.
 | `(persimmon/assoc coll k x)`   | a vector or map with `k` replaced by `x`     |
 | `(persimmon/dissoc map k)`     | a map without the key `k`                    |
 | `(persimmon/disj set x)`       | a set without the element `x`                |
+| `(persimmon/transient coll)`   | a mutable view of a vector, map or set       |
+| `(persimmon/persistent! trans)`| consume a transient and return its collection|
+| `(persimmon/conj! trans x)`    | append to a vector or add to a set transient |
+| `(persimmon/assoc! trans k x)` | update a vector or map transient             |
+| `(persimmon/dissoc! trans k)`  | remove a key from a map transient            |
+| `(persimmon/disj! trans x)`    | remove an element from a set transient       |
 | `(persimmon/has-key? coll k)`  | whether a map or set holds `k`               |
 | `(persimmon/first lst)`        | the head of a list, or nil if it is empty    |
 | `(persimmon/rest lst)`         | a list without its head                      |
@@ -232,6 +254,7 @@ test suite so timing never decides whether a correctness check passes:
 
 ```console
 $ janet res/bench/core.janet
+$ janet res/bench/janet.janet
 ```
 
 Run it several times on an otherwise idle machine when comparing revisions.

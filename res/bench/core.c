@@ -82,8 +82,11 @@ static void benchmark_list(void) {
 
     clock_t start = clock();
     for (size_t i = 0; i < count; i++) {
+        persimm_list_t next;
         int value = (int)i;
-        check(persimm_list_cons(&list, &value), "list cons");
+        check(persimm_list_cons(&list, &value, &next), "list cons");
+        persimm_list_deinit(&list);
+        list = next;
     }
     report("list cons", count, seconds_since(start));
 
@@ -101,7 +104,12 @@ static void benchmark_list(void) {
     report("list cursor traversal", count, seconds_since(start));
 
     start = clock();
-    for (size_t i = 0; i < count; i++) check(persimm_list_rest(&list), "list rest");
+    for (size_t i = 0; i < count; i++) {
+        persimm_list_t next;
+        check(persimm_list_rest(&list, &next), "list rest");
+        persimm_list_deinit(&list);
+        list = next;
+    }
     report("list rest", count, seconds_since(start));
     persimm_list_deinit(&list);
 }
@@ -109,14 +117,17 @@ static void benchmark_list(void) {
 static void benchmark_vector(void) {
     size_t count = scaled(500000);
     persimm_vector_t vector;
-    check(persimm_vector_init(&vector, sizeof(int), NULL, NULL), "vector init");
+    persimm_vector_transient_t transient;
+    check(persimm_vector_transient_init(&transient, sizeof(int), NULL, NULL),
+          "vector transient init");
 
     clock_t start = clock();
     for (size_t i = 0; i < count; i++) {
         int value = (int)i;
-        check(persimm_vector_push(&vector, &value, false), "mutable vector push");
+        check(persimm_vector_transient_push(&transient, &value), "transient vector push");
     }
-    report("vector push (builder)", count, seconds_since(start));
+    report("vector push (transient)", count, seconds_since(start));
+    check(persimm_vector_transient_persist(&transient, &vector), "persist vector transient");
 
     start = clock();
     for (size_t i = 0; i < count; i++) {
@@ -136,12 +147,23 @@ static void benchmark_vector(void) {
     for (size_t i = 0; i < count; i++) {
         persimm_vector_t next;
         int value = (int)i;
-        persimm_vector_clone(&vector, &next);
-        check(persimm_vector_push(&next, &value, true), "persistent vector push");
+        check(persimm_vector_push(&vector, &value, &next), "persistent vector push");
         persimm_vector_deinit(&vector);
         vector = next;
     }
     report("vector push (persistent)", count, seconds_since(start));
+    sink += vector.count;
+    persimm_vector_deinit(&vector);
+
+    check(persimm_vector_transient_init(&transient, sizeof(int), NULL, NULL),
+          "vector transient init");
+    start = clock();
+    for (size_t i = 0; i < count; i++) {
+        int value = (int)i;
+        check(persimm_vector_transient_push(&transient, &value), "transient vector push");
+    }
+    report("vector push (transient)", count, seconds_since(start));
+    check(persimm_vector_transient_persist(&transient, &vector), "persist vector transient");
     sink += vector.count;
     persimm_vector_deinit(&vector);
 }
@@ -149,14 +171,17 @@ static void benchmark_vector(void) {
 static void benchmark_map(void) {
     size_t count = scaled(150000);
     persimm_map_t map;
-    check(persimm_map_init(&map, &entry_layout, NULL, &int_key_ops, NULL), "map init");
+    persimm_map_transient_t transient;
+    check(persimm_map_transient_init(&transient, &entry_layout, NULL, &int_key_ops, NULL),
+          "map transient init");
 
     clock_t start = clock();
     for (size_t i = 0; i < count; i++) {
         entry_t entry = { (int)i, (int)(i * 3) };
-        check(persimm_map_assoc(&map, &entry, false), "mutable map assoc");
+        check(persimm_map_transient_assoc(&transient, &entry), "transient map assoc");
     }
-    report("map assoc (builder)", count, seconds_since(start));
+    report("map assoc (transient)", count, seconds_since(start));
+    check(persimm_map_transient_persist(&transient, &map), "persist map transient");
 
     start = clock();
     for (size_t i = 0; i < count; i++) {
@@ -177,8 +202,7 @@ static void benchmark_map(void) {
     for (size_t i = 0; i < count; i++) {
         persimm_map_t next;
         entry_t entry = { (int)i, (int)(i * 3) };
-        persimm_map_clone(&map, &next);
-        check(persimm_map_assoc(&next, &entry, true), "persistent map assoc");
+        check(persimm_map_assoc(&map, &entry, &next), "persistent map assoc");
         persimm_map_deinit(&map);
         map = next;
     }
@@ -188,12 +212,32 @@ static void benchmark_map(void) {
     for (size_t i = 0; i < count; i++) {
         persimm_map_t next;
         int key = (int)i;
-        persimm_map_clone(&map, &next);
-        check(persimm_map_dissoc(&next, &key, true), "persistent map dissoc");
+        check(persimm_map_dissoc(&map, &key, &next), "persistent map dissoc");
         persimm_map_deinit(&map);
         map = next;
     }
     report("map dissoc (persistent)", count, seconds_since(start));
+    persimm_map_deinit(&map);
+
+    check(persimm_map_transient_init(&transient, &entry_layout, NULL, &int_key_ops, NULL),
+          "map transient init");
+    start = clock();
+    for (size_t i = 0; i < count; i++) {
+        entry_t entry = { (int)i, (int)(i * 3) };
+        check(persimm_map_transient_assoc(&transient, &entry), "transient map assoc");
+    }
+    report("map assoc (transient)", count, seconds_since(start));
+    check(persimm_map_transient_persist(&transient, &map), "persist map transient");
+
+    persimm_map_to_transient(&map, &transient);
+    persimm_map_deinit(&map);
+    start = clock();
+    for (size_t i = 0; i < count; i++) {
+        int key = (int)i;
+        check(persimm_map_transient_dissoc(&transient, &key), "transient map dissoc");
+    }
+    report("map dissoc (transient)", count, seconds_since(start));
+    check(persimm_map_transient_persist(&transient, &map), "persist map transient");
     persimm_map_deinit(&map);
 }
 

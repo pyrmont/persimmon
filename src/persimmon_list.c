@@ -156,7 +156,7 @@ bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index
 
 /* Inserting */
 
-persimm_status persimm_list_cons(persimm_list_t *list, const void *elem) {
+static persimm_status persimm_list_cons_in_place(persimm_list_t *list, const void *elem) {
     persimm_list_cell_t *cell = persimm_list_cell_new(list->elem_size);
     if (NULL == cell) return PERSIMM_ERR_ALLOC;
 
@@ -174,7 +174,7 @@ persimm_status persimm_list_cons(persimm_list_t *list, const void *elem) {
 
 /* Removing */
 
-persimm_status persimm_list_rest(persimm_list_t *list) {
+static persimm_status persimm_list_rest_in_place(persimm_list_t *list) {
     if (NULL == list->head) return PERSIMM_ERR_BOUNDS;
 
     persimm_list_cell_t *head = list->head;
@@ -190,6 +190,23 @@ persimm_status persimm_list_rest(persimm_list_t *list) {
     list->generation++;
 
     return PERSIMM_OK;
+}
+
+persimm_status persimm_list_cons(const persimm_list_t *src, const void *elem,
+                                 persimm_list_t *dest) {
+    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
+    persimm_list_clone(src, dest);
+    persimm_status status = persimm_list_cons_in_place(dest, elem);
+    if (PERSIMM_OK != status) persimm_list_deinit(dest);
+    return status;
+}
+
+persimm_status persimm_list_rest(const persimm_list_t *src, persimm_list_t *dest) {
+    if ((const void *)src == (const void *)dest) return PERSIMM_ERR_INVALID;
+    persimm_list_clone(src, dest);
+    persimm_status status = persimm_list_rest_in_place(dest);
+    if (PERSIMM_OK != status) persimm_list_deinit(dest);
+    return status;
 }
 
 /* Traversing */

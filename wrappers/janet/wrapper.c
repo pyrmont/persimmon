@@ -85,6 +85,50 @@ static int64_t janet_persimm_integer(Janet input) {
     return value;
 }
 
+/* Construction owns its unpublished value outright. Moving it through a
+ * transient keeps that fast path out of the persistent API without leaving a
+ * half-built value invisible to Janet's collector between unmarshalled items. */
+static persimm_status janet_persimm_vector_build_push(persimm_vector_t *vector,
+                                                      const void *elem) {
+    persimm_vector_transient_t transient;
+    persimm_vector_to_transient(vector, &transient);
+    persimm_vector_deinit(vector);
+    persimm_status status = persimm_vector_transient_push(&transient, elem);
+    persimm_status persisted = persimm_vector_transient_persist(&transient, vector);
+    return PERSIMM_OK == status ? persisted : status;
+}
+
+static persimm_status janet_persimm_list_build_cons(persimm_list_t *list,
+                                                    const void *elem) {
+    persimm_list_t next;
+    persimm_status status = persimm_list_cons(list, elem, &next);
+    if (PERSIMM_OK == status) {
+        persimm_list_deinit(list);
+        *list = next;
+    }
+    return status;
+}
+
+static persimm_status janet_persimm_map_build_assoc(persimm_map_t *map,
+                                                    const void *entry) {
+    persimm_map_transient_t transient;
+    persimm_map_to_transient(map, &transient);
+    persimm_map_deinit(map);
+    persimm_status status = persimm_map_transient_assoc(&transient, entry);
+    persimm_status persisted = persimm_map_transient_persist(&transient, map);
+    return PERSIMM_OK == status ? persisted : status;
+}
+
+static persimm_status janet_persimm_set_build_conj(persimm_set_t *set,
+                                                   const void *elem) {
+    persimm_set_transient_t transient;
+    persimm_set_to_transient(set, &transient);
+    persimm_set_deinit(set);
+    persimm_status status = persimm_set_transient_conj(&transient, elem);
+    persimm_status persisted = persimm_set_transient_persist(&transient, set);
+    return PERSIMM_OK == status ? persisted : status;
+}
+
 static void janet_persimm_to_array_visit(void *slot, size_t index, void *ctx) {
     (void) index;
     janet_array_push((JanetArray *)ctx, *(Janet *)slot);
@@ -201,7 +245,7 @@ static void janet_persimm_reverse_visit(void *slot, size_t index, void *ctx) {
     (void) index;
     janet_persimm_reverse_t *state = (janet_persimm_reverse_t *)ctx;
     if (PERSIMM_OK != state->status) return;
-    state->status = persimm_list_cons(state->into, slot);
+    state->status = janet_persimm_list_build_cons(state->into, slot);
 }
 
 /*
@@ -408,7 +452,7 @@ static void *janet_persimm_vector_unmarshal(JanetMarshalContext *ctx) {
     size_t count = janet_persimm_unmarshal_count(ctx);
     for (size_t i = 0; i < count; i++) {
         Janet value = janet_unmarshal_janet(ctx);
-        janet_persimm_check(persimm_vector_push(vector, &value, false));
+        janet_persimm_check(janet_persimm_vector_build_push(vector, &value));
     }
 
     return vector;
@@ -555,7 +599,7 @@ static void *janet_persimm_list_unmarshal(JanetMarshalContext *ctx) {
     size_t count = janet_persimm_unmarshal_count(ctx);
     for (size_t i = 0; i < count; i++) {
         Janet value = janet_unmarshal_janet(ctx);
-        janet_persimm_check(persimm_list_cons(&wrapper->list, &value));
+        janet_persimm_check(janet_persimm_list_build_cons(&wrapper->list, &value));
     }
 
     /* The elements went on the front as they arrived, so the chain reads
@@ -739,9 +783,9 @@ static void *janet_persimm_map_unmarshal(JanetMarshalContext *ctx) {
            collector can see it, while the value is read. Storing it a second
            time replaces the stand-in and leaves the count where it was. */
         janet_persimm_entry_t entry = { key, key };
-        janet_persimm_check(persimm_map_assoc(map, &entry, false));
+        janet_persimm_check(janet_persimm_map_build_assoc(map, &entry));
         entry.value = janet_unmarshal_janet(ctx);
-        janet_persimm_check(persimm_map_assoc(map, &entry, false));
+        janet_persimm_check(janet_persimm_map_build_assoc(map, &entry));
     }
 
     return map;
@@ -883,7 +927,7 @@ static void *janet_persimm_set_unmarshal(JanetMarshalContext *ctx) {
     for (size_t i = 0; i < count; i++) {
         Janet elem = janet_unmarshal_janet(ctx);
         janet_persimm_check_key(elem);
-        janet_persimm_check(persimm_set_conj(set, &elem, false));
+        janet_persimm_check(janet_persimm_set_build_conj(set, &elem));
     }
 
     return set;
@@ -900,11 +944,199 @@ static JanetMethod persimm_set_methods[] = {
     {NULL, NULL}
 };
 
+/* Transients */
+
+static void janet_persimm_require_active(bool active) {
+    if (!active) janet_panic("transient is no longer active");
+}
+
+static int janet_persimm_transient_compare(void *a, void *b) {
+    (void) a;
+    (void) b;
+    janet_panic("cannot compare a transient");
+}
+
+static int32_t janet_persimm_transient_hash(void *p, size_t size) {
+    (void) p;
+    (void) size;
+    janet_panic("cannot hash a transient");
+}
+
+static int janet_persimm_vector_transient_gc(void *p, size_t size) {
+    (void) size;
+    persimm_vector_transient_deinit((persimm_vector_transient_t *)p);
+    return 0;
+}
+
+static int janet_persimm_vector_transient_mark(void *p, size_t size) {
+    (void) size;
+    persimm_vector_transient_t *transient = (persimm_vector_transient_t *)p;
+    if (transient->active) persimm_vector_trace(&transient->value);
+    return 0;
+}
+
+static int janet_persimm_vector_transient_get(void *p, Janet key, Janet *out) {
+    persimm_vector_transient_t *transient = (persimm_vector_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+
+    size_t index;
+    if (!persimm_vector_index(&transient->value, janet_persimm_integer(key), &index)) return 0;
+    *out = janet_persimm_vector_at(&transient->value, index);
+    return 1;
+}
+
+static Janet janet_persimm_vector_transient_next(void *p, Janet key) {
+    persimm_vector_transient_t *transient = (persimm_vector_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    return janet_persimm_next_index(transient->value.count, key);
+}
+
+static size_t janet_persimm_vector_transient_length(void *p, size_t size) {
+    (void) size;
+    persimm_vector_transient_t *transient = (persimm_vector_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    return transient->value.count;
+}
+
+static const JanetAbstractType persimm_vector_transient_type = {
+    "persimmon/vector-transient",
+    janet_persimm_vector_transient_gc,
+    janet_persimm_vector_transient_mark, /* GC Mark */
+    janet_persimm_vector_transient_get, /* Get */
+    NULL, /* Set */
+    NULL, /* Marshall */
+    NULL, /* Unmarshall */
+    NULL, /* String */
+    janet_persimm_transient_compare, /* Compare */
+    janet_persimm_transient_hash, /* Hash */
+    janet_persimm_vector_transient_next, /* Next */
+    NULL, /* Call */
+    janet_persimm_vector_transient_length, /* Length */
+    JANET_ATEND_LENGTH
+};
+
+static int janet_persimm_map_transient_gc(void *p, size_t size) {
+    (void) size;
+    persimm_map_transient_deinit((persimm_map_transient_t *)p);
+    return 0;
+}
+
+static int janet_persimm_map_transient_mark(void *p, size_t size) {
+    (void) size;
+    persimm_map_transient_t *transient = (persimm_map_transient_t *)p;
+    if (transient->active) persimm_map_trace(&transient->value);
+    return 0;
+}
+
+static int janet_persimm_map_transient_get(void *p, Janet key, Janet *out) {
+    persimm_map_transient_t *transient = (persimm_map_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    if (janet_checktype(key, JANET_NIL)) return 0;
+
+    void *value = persimm_map_ref(&transient->value, &key);
+    if (NULL == value) return 0;
+    *out = *(Janet *)value;
+    return 1;
+}
+
+static Janet janet_persimm_map_transient_next(void *p, Janet key) {
+    persimm_map_transient_t *transient = (persimm_map_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    void *entry = janet_checktype(key, JANET_NIL)
+        ? persimm_map_next(&transient->value, NULL)
+        : persimm_map_next(&transient->value, &key);
+    return (NULL == entry) ? janet_wrap_nil() : ((janet_persimm_entry_t *)entry)->key;
+}
+
+static size_t janet_persimm_map_transient_length(void *p, size_t size) {
+    (void) size;
+    persimm_map_transient_t *transient = (persimm_map_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    return transient->value.count;
+}
+
+static const JanetAbstractType persimm_map_transient_type = {
+    "persimmon/map-transient",
+    janet_persimm_map_transient_gc,
+    janet_persimm_map_transient_mark, /* GC Mark */
+    janet_persimm_map_transient_get, /* Get */
+    NULL, /* Set */
+    NULL, /* Marshall */
+    NULL, /* Unmarshall */
+    NULL, /* String */
+    janet_persimm_transient_compare, /* Compare */
+    janet_persimm_transient_hash, /* Hash */
+    janet_persimm_map_transient_next, /* Next */
+    NULL, /* Call */
+    janet_persimm_map_transient_length, /* Length */
+    JANET_ATEND_LENGTH
+};
+
+static int janet_persimm_set_transient_gc(void *p, size_t size) {
+    (void) size;
+    persimm_set_transient_deinit((persimm_set_transient_t *)p);
+    return 0;
+}
+
+static int janet_persimm_set_transient_mark(void *p, size_t size) {
+    (void) size;
+    persimm_set_transient_t *transient = (persimm_set_transient_t *)p;
+    if (transient->active) persimm_set_trace(&transient->value);
+    return 0;
+}
+
+static int janet_persimm_set_transient_get(void *p, Janet key, Janet *out) {
+    persimm_set_transient_t *transient = (persimm_set_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    if (janet_checktype(key, JANET_NIL)) return 0;
+
+    void *elem = persimm_set_ref(&transient->value, &key);
+    if (NULL == elem) return 0;
+    *out = *(Janet *)elem;
+    return 1;
+}
+
+static Janet janet_persimm_set_transient_next(void *p, Janet key) {
+    persimm_set_transient_t *transient = (persimm_set_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    void *elem = janet_checktype(key, JANET_NIL)
+        ? persimm_set_next(&transient->value, NULL)
+        : persimm_set_next(&transient->value, &key);
+    return (NULL == elem) ? janet_wrap_nil() : *(Janet *)elem;
+}
+
+static size_t janet_persimm_set_transient_length(void *p, size_t size) {
+    (void) size;
+    persimm_set_transient_t *transient = (persimm_set_transient_t *)p;
+    janet_persimm_require_active(transient->active);
+    return transient->value.count;
+}
+
+static const JanetAbstractType persimm_set_transient_type = {
+    "persimmon/set-transient",
+    janet_persimm_set_transient_gc,
+    janet_persimm_set_transient_mark, /* GC Mark */
+    janet_persimm_set_transient_get, /* Get */
+    NULL, /* Set */
+    NULL, /* Marshall */
+    NULL, /* Unmarshall */
+    NULL, /* String */
+    janet_persimm_transient_compare, /* Compare */
+    janet_persimm_transient_hash, /* Hash */
+    janet_persimm_set_transient_next, /* Next */
+    NULL, /* Call */
+    janet_persimm_set_transient_length, /* Length */
+    JANET_ATEND_LENGTH
+};
+
 /* Constructing */
 
+static persimm_vector_t *janet_persimm_alloc_vector(void) {
+    return (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
+}
+
 static persimm_vector_t *janet_persimm_new_vector(void) {
-    persimm_vector_t *vector =
-        (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
+    persimm_vector_t *vector = janet_persimm_alloc_vector();
     janet_persimm_check(persimm_vector_init(vector, sizeof(Janet), &janet_persimm_ops, NULL));
     return vector;
 }
@@ -927,35 +1159,25 @@ static janet_persimm_list_t *janet_persimm_new_list(void) {
     return wrapper;
 }
 
-static janet_persimm_list_t *janet_persimm_clone_list(const persimm_list_t *src) {
-    janet_persimm_list_t *wrapper = janet_persimm_alloc_list();
-    persimm_list_clone(src, &wrapper->list);
-    return wrapper;
+static persimm_map_t *janet_persimm_alloc_map(void) {
+    return (persimm_map_t *)janet_abstract(&persimm_map_type, sizeof(persimm_map_t));
 }
 
 static persimm_map_t *janet_persimm_new_map(void) {
-    persimm_map_t *map = (persimm_map_t *)janet_abstract(&persimm_map_type, sizeof(persimm_map_t));
+    persimm_map_t *map = janet_persimm_alloc_map();
     janet_persimm_check(persimm_map_init(map, &janet_persimm_map_layout, &janet_persimm_ops,
                                          &janet_persimm_key_ops, NULL));
     return map;
 }
 
-static persimm_map_t *janet_persimm_clone_map(const persimm_map_t *src) {
-    persimm_map_t *map = (persimm_map_t *)janet_abstract(&persimm_map_type, sizeof(persimm_map_t));
-    persimm_map_clone(src, map);
-    return map;
+static persimm_set_t *janet_persimm_alloc_set(void) {
+    return (persimm_set_t *)janet_abstract(&persimm_set_type, sizeof(persimm_set_t));
 }
 
 static persimm_set_t *janet_persimm_new_set(void) {
-    persimm_set_t *set = (persimm_set_t *)janet_abstract(&persimm_set_type, sizeof(persimm_set_t));
+    persimm_set_t *set = janet_persimm_alloc_set();
     janet_persimm_check(persimm_set_init(set, sizeof(Janet), &janet_persimm_ops,
                                          &janet_persimm_key_ops, NULL));
-    return set;
-}
-
-static persimm_set_t *janet_persimm_clone_set(const persimm_set_t *src) {
-    persimm_set_t *set = (persimm_set_t *)janet_abstract(&persimm_set_type, sizeof(persimm_set_t));
-    persimm_set_clone(src, set);
     return set;
 }
 
@@ -980,7 +1202,7 @@ static Janet cfun_persimm_vec(int32_t argc, Janet *argv) {
         JanetView view;
         janet_persimm_view(argv[0], &view);
         for (int32_t i = 0; i < view.len; i++) {
-            janet_persimm_check(persimm_vector_push(vector, &view.items[i], false));
+            janet_persimm_check(janet_persimm_vector_build_push(vector, &view.items[i]));
         }
     }
 
@@ -998,7 +1220,7 @@ static Janet cfun_persimm_list(int32_t argc, Janet *argv) {
         /* Consing walks the collection backwards so the list reads in the
            same order as the collection it came from. */
         for (int32_t i = view.len - 1; i >= 0; i--) {
-            janet_persimm_check(persimm_list_cons(&wrapper->list, &view.items[i]));
+            janet_persimm_check(janet_persimm_list_build_cons(&wrapper->list, &view.items[i]));
         }
     }
 
@@ -1022,7 +1244,7 @@ static Janet cfun_persimm_map(int32_t argc, Janet *argv) {
             if (janet_checktype(kvs[i].key, JANET_NIL)) continue;
             if (janet_checktype(kvs[i].value, JANET_NIL)) continue;
             janet_persimm_entry_t entry = { kvs[i].key, kvs[i].value };
-            janet_persimm_check(persimm_map_assoc(map, &entry, false));
+            janet_persimm_check(janet_persimm_map_build_assoc(map, &entry));
         }
     }
 
@@ -1039,7 +1261,7 @@ static Janet cfun_persimm_set(int32_t argc, Janet *argv) {
         janet_persimm_view(argv[0], &view);
         for (int32_t i = 0; i < view.len; i++) {
             janet_persimm_check_key(view.items[i]);
-            janet_persimm_check(persimm_set_conj(set, &view.items[i], false));
+            janet_persimm_check(janet_persimm_set_build_conj(set, &view.items[i]));
         }
     }
 
@@ -1056,24 +1278,22 @@ static Janet cfun_persimm_conj(int32_t argc, Janet *argv) {
     if (janet_checkabstract(argv[0], &persimm_set_type)) {
         persimm_set_t *old_set = (persimm_set_t *)janet_unwrap_abstract(argv[0]);
         janet_persimm_check_key(argv[1]);
-        persimm_set_t *new_set = janet_persimm_clone_set(old_set);
-        janet_persimm_check(persimm_set_conj(new_set, argv + 1, true));
+        persimm_set_t *new_set = janet_persimm_alloc_set();
+        janet_persimm_check(persimm_set_conj(old_set, argv + 1, new_set));
         return janet_wrap_abstract(new_set);
     }
 
     if (janet_checkabstract(argv[0], &persimm_vector_type)) {
         persimm_vector_t *old_vector = (persimm_vector_t *)janet_unwrap_abstract(argv[0]);
-        persimm_vector_t *new_vector =
-            (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
-        persimm_vector_clone(old_vector, new_vector);
-        janet_persimm_check(persimm_vector_push(new_vector, argv + 1, true));
+        persimm_vector_t *new_vector = janet_persimm_alloc_vector();
+        janet_persimm_check(persimm_vector_push(old_vector, argv + 1, new_vector));
         return janet_wrap_abstract(new_vector);
     }
 
     if (janet_checkabstract(argv[0], &persimm_list_type)) {
         janet_persimm_list_t *old_list = (janet_persimm_list_t *)janet_unwrap_abstract(argv[0]);
-        janet_persimm_list_t *new_list = janet_persimm_clone_list(&old_list->list);
-        janet_persimm_check(persimm_list_cons(&new_list->list, argv + 1));
+        janet_persimm_list_t *new_list = janet_persimm_alloc_list();
+        janet_persimm_check(persimm_list_cons(&old_list->list, argv + 1, &new_list->list));
         return janet_wrap_abstract(new_list);
     }
 
@@ -1087,15 +1307,15 @@ static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
         persimm_map_t *old_map = (persimm_map_t *)janet_unwrap_abstract(argv[0]);
         janet_persimm_check_key(argv[1]);
 
-        persimm_map_t *new_map = janet_persimm_clone_map(old_map);
+        persimm_map_t *new_map = janet_persimm_alloc_map();
 
         /* A nil value is no value, as it is for a Janet table, so storing one
            takes the key away rather than leaving it holding nothing. */
         if (janet_checktype(argv[2], JANET_NIL)) {
-            janet_persimm_check(persimm_map_dissoc(new_map, argv + 1, true));
+            janet_persimm_check(persimm_map_dissoc(old_map, argv + 1, new_map));
         } else {
             janet_persimm_entry_t entry = { argv[1], argv[2] };
-            janet_persimm_check(persimm_map_assoc(new_map, &entry, true));
+            janet_persimm_check(persimm_map_assoc(old_map, &entry, new_map));
         }
 
         return janet_wrap_abstract(new_map);
@@ -1109,11 +1329,8 @@ static Janet cfun_persimm_assoc(int32_t argc, Janet *argv) {
         janet_panic("index out of bounds");
     }
 
-    persimm_vector_t *new_vector =
-        (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
-    persimm_vector_clone(old_vector, new_vector);
-
-    janet_persimm_check(persimm_vector_update(new_vector, index, argv + 2, true));
+    persimm_vector_t *new_vector = janet_persimm_alloc_vector();
+    janet_persimm_check(persimm_vector_update(old_vector, index, argv + 2, new_vector));
 
     return janet_wrap_abstract(new_vector);
 }
@@ -1124,8 +1341,8 @@ static Janet cfun_persimm_dissoc(int32_t argc, Janet *argv) {
     persimm_map_t *old_map = (persimm_map_t *)janet_getabstract(argv, 0, &persimm_map_type);
     janet_persimm_check_key(argv[1]);
 
-    persimm_map_t *new_map = janet_persimm_clone_map(old_map);
-    janet_persimm_check(persimm_map_dissoc(new_map, argv + 1, true));
+    persimm_map_t *new_map = janet_persimm_alloc_map();
+    janet_persimm_check(persimm_map_dissoc(old_map, argv + 1, new_map));
 
     return janet_wrap_abstract(new_map);
 }
@@ -1136,10 +1353,134 @@ static Janet cfun_persimm_disj(int32_t argc, Janet *argv) {
     persimm_set_t *old_set = (persimm_set_t *)janet_getabstract(argv, 0, &persimm_set_type);
     janet_persimm_check_key(argv[1]);
 
-    persimm_set_t *new_set = janet_persimm_clone_set(old_set);
-    janet_persimm_check(persimm_set_disj(new_set, argv + 1, true));
+    persimm_set_t *new_set = janet_persimm_alloc_set();
+    janet_persimm_check(persimm_set_disj(old_set, argv + 1, new_set));
 
     return janet_wrap_abstract(new_set);
+}
+
+static Janet cfun_persimm_transient(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 1);
+
+    if (janet_checkabstract(argv[0], &persimm_vector_type)) {
+        persimm_vector_transient_t *transient =
+            (persimm_vector_transient_t *)janet_abstract(
+                &persimm_vector_transient_type, sizeof(persimm_vector_transient_t));
+        persimm_vector_to_transient((persimm_vector_t *)janet_unwrap_abstract(argv[0]), transient);
+        return janet_wrap_abstract(transient);
+    }
+
+    if (janet_checkabstract(argv[0], &persimm_map_type)) {
+        persimm_map_transient_t *transient =
+            (persimm_map_transient_t *)janet_abstract(
+                &persimm_map_transient_type, sizeof(persimm_map_transient_t));
+        persimm_map_to_transient((persimm_map_t *)janet_unwrap_abstract(argv[0]), transient);
+        return janet_wrap_abstract(transient);
+    }
+
+    if (janet_checkabstract(argv[0], &persimm_set_type)) {
+        persimm_set_transient_t *transient =
+            (persimm_set_transient_t *)janet_abstract(
+                &persimm_set_transient_type, sizeof(persimm_set_transient_t));
+        persimm_set_to_transient((persimm_set_t *)janet_unwrap_abstract(argv[0]), transient);
+        return janet_wrap_abstract(transient);
+    }
+
+    janet_panicf("expected a persimmon vector, map or set, got %v", argv[0]);
+}
+
+static Janet cfun_persimm_persistent(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 1);
+
+    if (janet_checkabstract(argv[0], &persimm_vector_transient_type)) {
+        persimm_vector_t *vector =
+            (persimm_vector_t *)janet_abstract(&persimm_vector_type, sizeof(persimm_vector_t));
+        janet_persimm_check(persimm_vector_transient_persist(
+            (persimm_vector_transient_t *)janet_unwrap_abstract(argv[0]), vector));
+        return janet_wrap_abstract(vector);
+    }
+
+    if (janet_checkabstract(argv[0], &persimm_map_transient_type)) {
+        persimm_map_t *map =
+            (persimm_map_t *)janet_abstract(&persimm_map_type, sizeof(persimm_map_t));
+        janet_persimm_check(persimm_map_transient_persist(
+            (persimm_map_transient_t *)janet_unwrap_abstract(argv[0]), map));
+        return janet_wrap_abstract(map);
+    }
+
+    if (janet_checkabstract(argv[0], &persimm_set_transient_type)) {
+        persimm_set_t *set =
+            (persimm_set_t *)janet_abstract(&persimm_set_type, sizeof(persimm_set_t));
+        janet_persimm_check(persimm_set_transient_persist(
+            (persimm_set_transient_t *)janet_unwrap_abstract(argv[0]), set));
+        return janet_wrap_abstract(set);
+    }
+
+    janet_panicf("expected a persimmon transient, got %v", argv[0]);
+}
+
+static Janet cfun_persimm_conj_mut(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 2);
+
+    if (janet_checkabstract(argv[0], &persimm_vector_transient_type)) {
+        janet_persimm_check(persimm_vector_transient_push(
+            (persimm_vector_transient_t *)janet_unwrap_abstract(argv[0]), argv + 1));
+        return argv[0];
+    }
+
+    if (janet_checkabstract(argv[0], &persimm_set_transient_type)) {
+        janet_persimm_check_key(argv[1]);
+        janet_persimm_check(persimm_set_transient_conj(
+            (persimm_set_transient_t *)janet_unwrap_abstract(argv[0]), argv + 1));
+        return argv[0];
+    }
+
+    janet_panicf("expected a persimmon vector or set transient, got %v", argv[0]);
+}
+
+static Janet cfun_persimm_assoc_mut(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 3);
+
+    if (janet_checkabstract(argv[0], &persimm_map_transient_type)) {
+        persimm_map_transient_t *transient =
+            (persimm_map_transient_t *)janet_unwrap_abstract(argv[0]);
+        janet_persimm_check_key(argv[1]);
+        if (janet_checktype(argv[2], JANET_NIL)) {
+            janet_persimm_check(persimm_map_transient_dissoc(transient, argv + 1));
+        } else {
+            janet_persimm_entry_t entry = { argv[1], argv[2] };
+            janet_persimm_check(persimm_map_transient_assoc(transient, &entry));
+        }
+        return argv[0];
+    }
+
+    persimm_vector_transient_t *transient =
+        (persimm_vector_transient_t *)janet_getabstract(
+            argv, 0, &persimm_vector_transient_type);
+    size_t index;
+    if (!persimm_vector_index(&transient->value, janet_persimm_integer(argv[1]), &index)) {
+        janet_panic("index out of bounds");
+    }
+    janet_persimm_check(persimm_vector_transient_update(transient, index, argv + 2));
+    return argv[0];
+}
+
+static Janet cfun_persimm_dissoc_mut(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 2);
+    janet_persimm_check_key(argv[1]);
+    persimm_map_transient_t *transient =
+        (persimm_map_transient_t *)janet_getabstract(argv, 0, &persimm_map_transient_type);
+    janet_persimm_check(persimm_map_transient_dissoc(transient, argv + 1));
+    return argv[0];
+}
+
+static Janet cfun_persimm_disj_mut(int32_t argc, Janet *argv) {
+    janet_fixarity(argc, 2);
+    janet_persimm_check_key(argv[1]);
+    persimm_set_transient_t *transient =
+        (persimm_set_transient_t *)janet_getabstract(argv, 0, &persimm_set_transient_type);
+    janet_persimm_check(persimm_set_transient_disj(transient, argv + 1));
+    return argv[0];
 }
 
 /*
@@ -1196,10 +1537,12 @@ static Janet cfun_persimm_rest(int32_t argc, Janet *argv) {
     janet_persimm_list_t *old_list =
         (janet_persimm_list_t *)janet_getabstract(argv, 0, &persimm_list_type);
 
-    janet_persimm_list_t *new_list = janet_persimm_clone_list(&old_list->list);
+    janet_persimm_list_t *new_list = janet_persimm_alloc_list();
 
-    if (new_list->list.count > 0) {
-        janet_persimm_check(persimm_list_rest(&new_list->list));
+    if (old_list->list.count > 0) {
+        janet_persimm_check(persimm_list_rest(&old_list->list, &new_list->list));
+    } else {
+        persimm_list_clone(&old_list->list, &new_list->list);
     }
 
     return janet_wrap_abstract(new_list);
@@ -1249,6 +1592,12 @@ static const JanetReg cfuns[] = {
     {"dissoc", cfun_persimm_dissoc, NULL},
     {"conj", cfun_persimm_conj, NULL},
     {"disj", cfun_persimm_disj, NULL},
+    {"transient", cfun_persimm_transient, NULL},
+    {"persistent!", cfun_persimm_persistent, NULL},
+    {"conj!", cfun_persimm_conj_mut, NULL},
+    {"assoc!", cfun_persimm_assoc_mut, NULL},
+    {"dissoc!", cfun_persimm_dissoc_mut, NULL},
+    {"disj!", cfun_persimm_disj_mut, NULL},
     {"has-key?", cfun_persimm_has_key, NULL},
     {"first", cfun_persimm_first, NULL},
     {"rest", cfun_persimm_rest, NULL},
@@ -1265,6 +1614,9 @@ void persimm_register_type(JanetTable *env) {
     janet_register_abstract_type(&persimm_list_type);
     janet_register_abstract_type(&persimm_map_type);
     janet_register_abstract_type(&persimm_set_type);
+    janet_register_abstract_type(&persimm_vector_transient_type);
+    janet_register_abstract_type(&persimm_map_transient_type);
+    janet_register_abstract_type(&persimm_set_transient_type);
 }
 
 void persimm_register_functions(JanetTable *env) {

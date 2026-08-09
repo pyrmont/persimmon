@@ -182,6 +182,30 @@ typedef struct {
     persimm_hamt_node_t *root;
 } persimm_set_t;
 
+/*
+ * Temporary, mutable views of persistent structures. A transient starts by
+ * sharing its source, copies a shared path the first time it is touched, and
+ * may then reuse the path for later edits. Persisting consumes it: every later
+ * edit or second attempt to persist returns PERSIMM_ERR_INVALID.
+ *
+ * Treat every field as opaque. Transients are uniquely owned and must not be
+ * shared between threads.
+ */
+typedef struct {
+    persimm_vector_t value;
+    bool active;
+} persimm_vector_transient_t;
+
+typedef struct {
+    persimm_map_t value;
+    bool active;
+} persimm_map_transient_t;
+
+typedef struct {
+    persimm_set_t value;
+    bool active;
+} persimm_set_transient_t;
+
 /* Reference Counting */
 
 /*
@@ -191,6 +215,46 @@ typedef struct {
  * shared across threads.
  */
 bool persimm_has_atomic_refcounts(void);
+
+/* Transients */
+
+void persimm_vector_to_transient(const persimm_vector_t *src,
+                                 persimm_vector_transient_t *transient);
+persimm_status persimm_vector_transient_init(persimm_vector_transient_t *transient,
+                                             size_t elem_size,
+                                             const persimm_elem_ops *ops, void *ctx);
+void persimm_vector_transient_deinit(persimm_vector_transient_t *transient);
+persimm_status persimm_vector_transient_push(persimm_vector_transient_t *transient,
+                                             const void *elem);
+persimm_status persimm_vector_transient_update(persimm_vector_transient_t *transient,
+                                               size_t index, const void *elem);
+persimm_status persimm_vector_transient_persist(persimm_vector_transient_t *transient,
+                                                persimm_vector_t *dest);
+
+void persimm_map_to_transient(const persimm_map_t *src, persimm_map_transient_t *transient);
+persimm_status persimm_map_transient_init(persimm_map_transient_t *transient,
+                                          const persimm_entry_layout *layout,
+                                          const persimm_elem_ops *ops,
+                                          const persimm_key_ops *key_ops, void *ctx);
+void persimm_map_transient_deinit(persimm_map_transient_t *transient);
+persimm_status persimm_map_transient_assoc(persimm_map_transient_t *transient,
+                                           const void *entry);
+persimm_status persimm_map_transient_dissoc(persimm_map_transient_t *transient,
+                                            const void *key);
+persimm_status persimm_map_transient_persist(persimm_map_transient_t *transient,
+                                             persimm_map_t *dest);
+
+void persimm_set_to_transient(const persimm_set_t *src, persimm_set_transient_t *transient);
+persimm_status persimm_set_transient_init(persimm_set_transient_t *transient,
+                                          size_t elem_size, const persimm_elem_ops *ops,
+                                          const persimm_key_ops *key_ops, void *ctx);
+void persimm_set_transient_deinit(persimm_set_transient_t *transient);
+persimm_status persimm_set_transient_conj(persimm_set_transient_t *transient,
+                                          const void *elem);
+persimm_status persimm_set_transient_disj(persimm_set_transient_t *transient,
+                                          const void *elem);
+persimm_status persimm_set_transient_persist(persimm_set_transient_t *transient,
+                                             persimm_set_t *dest);
 
 /* Vectors */
 
@@ -223,22 +287,21 @@ void *persimm_vector_ref(const persimm_vector_t *vector, size_t index);
 bool persimm_vector_index(const persimm_vector_t *vector, int64_t input, size_t *index);
 
 /*
- * Appends `elem` to the vector, copying `elem_size` bytes out of it and
- * retaining the result. When `immutable` is true, any node on the path that is
- * shared with another vector is copied first; when false, the vector is
- * modified in place, which is only safe while no other vector shares it.
+ * Appends `elem` to `src`, placing the resulting persistent vector in `dest`.
+ * `src` is unchanged and `dest` must be uninitialised and distinct from it.
+ * The result shares every node the new path does not need to copy.
  *
- * On failure the vector remains valid and safe to deinitialise, but whether the
- * element was appended is unspecified beyond the return value.
+ * On failure `src` remains unchanged and `dest` is safe to deinitialise.
  */
-persimm_status persimm_vector_push(persimm_vector_t *vector, const void *elem, bool immutable);
+persimm_status persimm_vector_push(const persimm_vector_t *src, const void *elem,
+                                   persimm_vector_t *dest);
 
 /*
- * Replaces the element at `index`, releasing the one it displaces. `immutable`
- * carries the same meaning as for persimm_vector_push.
+ * Replaces the element at `index`, leaving `src` unchanged and placing the
+ * resulting persistent vector in `dest`.
  */
-persimm_status persimm_vector_update(persimm_vector_t *vector, size_t index, const void *elem,
-                                     bool immutable);
+persimm_status persimm_vector_update(const persimm_vector_t *src, size_t index,
+                                     const void *elem, persimm_vector_t *dest);
 
 /*
  * Walks the trie once, in index order, calling `fn` with each element's slot.
@@ -301,18 +364,17 @@ void *persimm_list_ref_from(const persimm_list_t *list, persimm_list_cursor_t *c
 bool persimm_list_index(const persimm_list_t *list, int64_t input, size_t *index);
 
 /*
- * Prepends `elem` to the list, copying `elem_size` bytes out of it and
- * retaining the result. There is no mutable variant: a cons never writes to an
- * existing cell, so it is safe whether or not the chain is shared.
+ * Prepends `elem` to `src`, leaving it unchanged and placing the resulting
+ * persistent list in `dest`.
  */
-persimm_status persimm_list_cons(persimm_list_t *list, const void *elem);
+persimm_status persimm_list_cons(const persimm_list_t *src, const void *elem,
+                                 persimm_list_t *dest);
 
 /*
- * Drops the head of the list, releasing it. Returns PERSIMM_ERR_BOUNDS if the
- * list is already empty. The cells behind the new head are untouched and stay
- * shared with any list still holding the old head.
+ * Drops the head of `src`, leaving it unchanged and placing the result in
+ * `dest`. Returns PERSIMM_ERR_BOUNDS if `src` is already empty.
  */
-persimm_status persimm_list_rest(persimm_list_t *list);
+persimm_status persimm_list_rest(const persimm_list_t *src, persimm_list_t *dest);
 
 /*
  * Walks the chain once, from head to tail, calling `fn` with each element's
@@ -366,20 +428,20 @@ void *persimm_map_ref_entry(const persimm_map_t *map, const void *key);
 bool persimm_map_has(const persimm_map_t *map, const void *key);
 
 /*
- * Stores `entry`, which the host lays out as its `layout` describes. Where the
- * key is already present only the value is replaced, and the key already
- * stored stays. `immutable` carries the same meaning as for a vector: when it
- * is false a node no other map shares may be written in place.
+ * Stores `entry` in a persistent copy of `src`. Where the key is already
+ * present only the value is replaced, and the key already stored stays.
  *
  * On failure the map is unchanged and remains safe to deinitialise.
  */
-persimm_status persimm_map_assoc(persimm_map_t *map, const void *entry, bool immutable);
+persimm_status persimm_map_assoc(const persimm_map_t *src, const void *entry,
+                                 persimm_map_t *dest);
 
 /*
  * Drops `key` and its value, releasing both. A key the map does not hold is
  * not an error and leaves the map alone.
  */
-persimm_status persimm_map_dissoc(persimm_map_t *map, const void *key, bool immutable);
+persimm_status persimm_map_dissoc(const persimm_map_t *src, const void *key,
+                                  persimm_map_t *dest);
 
 /*
  * Walks the trie once, calling `fn` with each entry. The order is not the
@@ -431,9 +493,11 @@ bool persimm_set_has(const persimm_set_t *set, const void *elem);
  * Adds `elem`, retaining it. An element the set already holds leaves it
  * untouched, so the first of a run of equal elements is the one kept.
  */
-persimm_status persimm_set_conj(persimm_set_t *set, const void *elem, bool immutable);
+persimm_status persimm_set_conj(const persimm_set_t *src, const void *elem,
+                                persimm_set_t *dest);
 
-persimm_status persimm_set_disj(persimm_set_t *set, const void *elem, bool immutable);
+persimm_status persimm_set_disj(const persimm_set_t *src, const void *elem,
+                                persimm_set_t *dest);
 
 void persimm_set_foreach(const persimm_set_t *set, persimm_visit_fn fn, void *ctx);
 
