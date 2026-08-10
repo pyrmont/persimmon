@@ -22,6 +22,12 @@
                            "persimmon-core-test.exe"
                            "persimmon-core-test")))
 
+(def- amal-dir (path "_build" "amalgam"))
+
+(def- amal-exe (path "_build" (if (= :windows (os/which))
+                                "persimmon-amalgam-test.exe"
+                                "persimmon-amalgam-test")))
+
 (defn- sources
   ``Reads the core's source files out of the info file, so that adding one to
     the build cannot leave it untested. Core sources live directly under src;
@@ -49,6 +55,15 @@
   (find |(runnable? [$ "--version"])
         (filter identity [(os/getenv "CC") "cc" "gcc" "clang"])))
 
+(defn- maker
+  ``Answers with the first make that can read the Makefile, or nil. Whatever
+    MAKE names is tried first, the way compiler treats CC. The probe is a dry
+    run of the target itself, so a make that cannot parse the Makefile counts
+    as no make at all.``
+  []
+  (find |(runnable? [$ "-C" root "-n" "amalgamation"])
+        (filter identity [(os/getenv "MAKE") "make" "gmake" "bmake"])))
+
 (defn- compile
   [cc]
   (os/mkdir (path "_build"))
@@ -60,9 +75,26 @@
                # reports and carries on, which would let a finding pass as green.
                ["-g" "-O1" "-fsanitize=address,undefined" "-fno-sanitize-recover=all"]
                ["-O1"])
-             ["-I" (path "inc") "-o" exe (path "test" "core.c")]
+             ["-I" (path "include") "-o" exe (path "test" "core.c")]
              (sources)))
   (os/execute cmd :p))
+
+(defn- amalgamate
+  [mk]
+  (os/execute [mk "-C" root "amalgamation"] :p))
+
+(defn- compile-amalgam
+  ``Builds the same checks against the amalgamation instead of the separate
+    sources. The sanitisers are left off: the code is the same either way, so
+    the core build above already covers it and running them twice only makes a
+    slow pre-release run slower. What is under test here is that merging the
+    sources into one translation unit still compiles and still behaves.``
+  [cc]
+  (os/execute [cc "-std=c99" "-Wall" "-Wextra" "-DPERSIMM_TEST_ALLOC" "-O1"
+               "-I" amal-dir "-o" amal-exe
+               (path "test" "core.c")
+               (string amal-dir "/persimmon.c")]
+              :p))
 
 (deftest core-checks
   (if-let [cc (compiler)]
@@ -79,5 +111,36 @@
       (print "  no C compiler found, so the core checks did not run")
       (print "  set CC to name one")
       (is true))))
+
+(deftest amalgamation-checks
+  (def cc (compiler))
+  (def mk (unless (= :windows (os/which)) (maker)))
+  (cond
+    (= :windows (os/which))
+    (do
+      (print "  the amalgamation is written by a make recipe that wants a")
+      (print "  posix shell, so it is not checked here")
+      (is true))
+
+    (nil? cc)
+    (do
+      (print "  no C compiler found, so the amalgamation checks did not run")
+      (print "  set CC to name one")
+      (is true))
+
+    (nil? mk)
+    (do
+      (print "  no make found, so the amalgamation checks did not run")
+      (print "  set MAKE to name one")
+      (is true))
+
+    (do
+      (print "  building the amalgamation with " mk " and checking it with " cc)
+      (flush)
+      (is (zero? (amalgamate mk)))
+      (flush)
+      (is (zero? (compile-amalgam cc)))
+      (flush)
+      (is (zero? (os/execute [amal-exe] :p))))))
 
 (run-tests!)

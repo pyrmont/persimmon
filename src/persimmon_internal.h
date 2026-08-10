@@ -2,7 +2,7 @@
 #define PERSIMMON_INTERNAL_H
 
 #include <string.h>
-#include "../inc/persimmon.h"
+#include "../include/persimmon.h"
 
 /* Trie Geometry */
 

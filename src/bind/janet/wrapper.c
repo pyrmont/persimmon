@@ -1,5 +1,5 @@
 #include "wrapper.h"
-#include "../../../inc/persimmon.h"
+#include "../../../include/persimmon.h"
 
 /*
  * The Janet binding. Elements are Janet values stored inline, so no reference

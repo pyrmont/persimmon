@@ -80,7 +80,7 @@ two share their whole implementation.
 The source code is separated into three components:
 
 ```
-inc/                    the public C header
+include/                the public C header
 src/                    the core C source
 src/bind/janet/         the Janet binding
 ```
@@ -137,8 +137,8 @@ A few notes:
 
 ## Installation
 
-The public C interface is [inc/persimmon.h](inc/persimmon.h). Building the
-core needs a C99 compiler, `make` and `ar`:
+The public C interface is [include/persimmon.h](include/persimmon.h). Building
+the core needs a C99 compiler, `make` and `ar`:
 
 ```console
 $ make
@@ -155,6 +155,19 @@ all be overridden for packaging:
 ```console
 $ make install DESTDIR=/tmp/package-root PREFIX=/usr
 ```
+
+### Vendoring
+
+The core only depends on the C standard library and so can be dropped
+straight into another project instead of installed. Copying `src/` and
+`include/` and adding `src/*.c` to an existing build is enough: the sources
+reach the public header by a relative path, so no include flag is needed to
+compile them. Only a project's own use of `persimmon.h` needs to find it.
+
+Alternatively, `make amalgamation` writes the core to `_build/amalgam` as a
+single `persimmon.c` and `persimmon.h` pair for users who would rather vendor
+two files than eight. The recipe is a shell one-liner, so a POSIX shell is
+required.
 
 The update functions for persistent collections take separate source and
 destination structures. The destination must be uninitialised and distinct from
