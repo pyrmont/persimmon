@@ -41,12 +41,32 @@
                    (= 1 (length (string/find-all "/" file))))]
     (path file)))
 
+(defn- run
+  ``Runs cmd with its output captured rather than let loose on the terminal.
+    Answers with the exit status and everything the command wrote, error
+    output folded in where it was written so that a diagnostic still sits
+    beside the line it belongs to.``
+  [cmd]
+  (def proc (os/spawn cmd :p {:out :pipe :err :out}))
+  # Reading to the end of the stream before waiting keeps a command whose
+  # output outgrows the pipe buffer from blocking on a reader that is itself
+  # blocked waiting for the command to exit.
+  (def out (ev/read (proc :out) :all))
+  [(os/proc-wait proc) (if out (string out) "")])
+
+(defn- report
+  ``Puts a command's output on the terminal verbatim, since a compiler lines
+    its diagnostics up against the source and indenting them here would only
+    move the carets away from what they point at.``
+  [output]
+  (unless (empty? output)
+    (prin output)
+    (unless (string/has-suffix? "\n" output) (print))))
+
 (defn- runnable?
   [cmd]
-  (def devnull (os/open (if (= :windows (os/which)) "NUL" "/dev/null") :w))
-  (defer (:close devnull)
-    (def [ok? status] (protect (os/execute cmd :p {:out devnull :err devnull})))
-    (and ok? (zero? status))))
+  (def [ok? status] (protect (first (run cmd))))
+  (and ok? (zero? status)))
 
 (defn- compiler
   ``Answers with the first C compiler that runs, or nil. Whatever CC names is
@@ -77,11 +97,11 @@
                ["-O1"])
              ["-I" (path "include") "-o" exe (path "test" "core.c")]
              (sources)))
-  (os/execute cmd :p))
+  (run cmd))
 
 (defn- amalgamate
   [mk]
-  (os/execute [mk "-C" root "amalgamation"] :p))
+  (run [mk "-C" root "amalgamation"]))
 
 (defn- compile-amalgam
   ``Builds the same checks against the amalgamation instead of the separate
@@ -90,23 +110,51 @@
     slow pre-release run slower. What is under test here is that merging the
     sources into one translation unit still compiles and still behaves.``
   [cc]
-  (os/execute [cc "-std=c99" "-Wall" "-Wextra" "-DPERSIMM_TEST_ALLOC" "-O1"
-               "-I" amal-dir "-o" amal-exe
-               (path "test" "core.c")
-               (string amal-dir "/persimmon.c")]
-              :p))
+  (run [cc "-std=c99" "-Wall" "-Wextra" "-DPERSIMM_TEST_ALLOC" "-O1"
+        "-I" amal-dir "-o" amal-exe
+        (path "test" "core.c")
+        (string amal-dir "/persimmon.c")]))
+
+(defn- checks-passed
+  ``Answers with what the checks found about atomic reference counts, or nil
+    if the output was not what a passing run writes. A run that holds prints
+    the two lines below and nothing else, so matching the whole of it catches
+    a binary that fell over partway through and still managed to exit zero,
+    which counting the failures it announced would not.``
+  [output]
+  (def lines (string/split "\n" (string/trimr output)))
+  (when (and (= 2 (length lines))
+             (= "core checks passed" (first lines)))
+    (first (or (peg/match ~(* "atomic reference counts: " '(+ "yes" "no") -1)
+                          (in lines 1))
+               []))))
+
+(defn- checked?
+  ``Runs a built check program, swallowing its output when that output is
+    what a passing run writes and putting it on the terminal otherwise, so a
+    failing run still says which checks failed and why. The answer about
+    atomics is reported either way: it is a property of the build rather than
+    of the code, and the run is the only place it is known.``
+  [prog]
+  (def [status output] (run [prog]))
+  (def atomics (checks-passed output))
+  (if atomics
+    (print "  the checks passed, with atomic reference counts: " atomics)
+    (report output))
+  (and (zero? status) (truthy? atomics)))
 
 (deftest core-checks
   (if-let [cc (compiler)]
     (do
       (print "  building the core checks with " cc
              (if (os/getenv "PERSIMMON_SANITISE") " and the sanitisers" ""))
-      # The compiler and the checks write straight to the file descriptor, so
-      # anything Janet is still holding has to go out first to stay in order.
-      (flush)
-      (is (zero? (compile cc)))
-      (flush)
-      (is (zero? (os/execute [exe] :p))))
+      (def [status output] (compile cc))
+      # Reported whatever the status, since a warning the compiler was content
+      # enough to exit zero on is still worth reading.
+      (report output)
+      (is (zero? status))
+      (when (zero? status)
+        (is (checked? exe))))
     (do
       (print "  no C compiler found, so the core checks did not run")
       (print "  set CC to name one")
@@ -136,11 +184,15 @@
 
     (do
       (print "  building the amalgamation with " mk " and checking it with " cc)
-      (flush)
-      (is (zero? (amalgamate mk)))
-      (flush)
-      (is (zero? (compile-amalgam cc)))
-      (flush)
-      (is (zero? (os/execute [amal-exe] :p))))))
+      # A recipe that runs says only which commands it ran, which is worth
+      # reading when one of them failed and is noise when none did.
+      (def [made made-output] (amalgamate mk))
+      (unless (zero? made) (report made-output))
+      (is (zero? made))
+      (def [built build-output] (compile-amalgam cc))
+      (report build-output)
+      (is (zero? built))
+      (when (and (zero? made) (zero? built))
+        (is (checked? amal-exe))))))
 
 (run-tests!)
