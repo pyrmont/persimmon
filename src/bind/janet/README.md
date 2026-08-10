@@ -31,7 +31,7 @@ Add the dependency to your `info.jdn` file:
 (def l1 (persimmon/list :bar :qux))
 (def l2 (persimmon/conj l1 :foo))
 
-(persimmon/first l2)                     # -> :foo
+(first l2)                               # -> :foo
 (persimmon/to-array (persimmon/rest l2)) # -> @[:bar :qux]
 
 (def m1 (persimmon/map :foo 1 :bar 2))

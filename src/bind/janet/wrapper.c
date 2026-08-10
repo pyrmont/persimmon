@@ -1890,21 +1890,6 @@ JANET_FN(cfun_persimm_to_table,
     return janet_wrap_table(table);
 }
 
-JANET_FN(cfun_persimm_first,
-         "(first list)",
-         "Returns the first element of a persistent list, or nil if the list is "
-         "empty.") {
-    janet_fixarity(argc, 1);
-
-    janet_persimm_list_t *wrapper =
-        (janet_persimm_list_t *)janet_getabstract(argv, 0, &persimm_list_type);
-
-    const void *slot = persimm_list_first(&wrapper->list);
-    if (NULL == slot) return janet_wrap_nil();
-
-    return *(const Janet *)slot;
-}
-
 /*
  * The rest of an empty list is an empty list, as in Clojure, rather than an
  * error.
@@ -2002,7 +1987,6 @@ void persimm_register_functions(JanetTable *env) {
         JANET_REG("dissoc!", cfun_persimm_dissoc_mut),
         JANET_REG("disj!", cfun_persimm_disj_mut),
         JANET_REG("has-key?", cfun_persimm_has_key),
-        JANET_REG("first", cfun_persimm_first),
         JANET_REG("rest", cfun_persimm_rest),
         JANET_REG("into", cfun_persimm_into),
         JANET_REG("to-array", cfun_persimm_to_array),

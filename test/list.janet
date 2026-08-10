@@ -11,18 +11,18 @@
 (deftest list-with-no-items
   (def lst (persimmon/list))
   (is (= 0 (length lst)))
-  (is (= nil (persimmon/first lst))))
+  (is (= nil (first lst))))
 
 (deftest list-with-one-item
   (def lst (persimmon/list :a))
   (is (= 1 (length lst)))
-  (is (= :a (persimmon/first lst)))
+  (is (= :a (first lst)))
   (is (= :a (get lst 0)))
   (is (= nil (get lst 1))))
 
 (deftest list-preserves-the-order-it-is-seeded-with
   (def lst (persimmon/list :foo :bar :qux))
-  (is (= :foo (persimmon/first lst)))
+  (is (= :foo (first lst)))
   (is (== [:foo :bar :qux] (persimmon/to-array lst))))
 
 # A list grows at the front, so a source goes in front of what the target
@@ -35,7 +35,7 @@
   (def lst1 (persimmon/list :c))
   (def lst2 (persimmon/into lst1 @[:a :b]))
   (is (== [:a :b :c] (persimmon/to-array lst2)))
-  (is (= :a (persimmon/first lst2)))
+  (is (= :a (first lst2)))
   (is (== [:c] (persimmon/to-array lst1))))
 
 (deftest into-a-list-from-an-empty-collection
@@ -45,7 +45,7 @@
 (deftest conj-prepends-to-a-list
   (def lst1 (persimmon/list :bar :qux))
   (def lst2 (persimmon/conj lst1 :foo))
-  (is (= :foo (persimmon/first lst2)))
+  (is (= :foo (first lst2)))
   (is (== [:foo :bar :qux] (persimmon/to-array lst2))))
 
 (deftest conj-does-not-modify-the-original-list
@@ -53,31 +53,31 @@
   (def lst2 (persimmon/conj lst1 :foo))
   (is (= 2 (length lst1)))
   (is (= 3 (length lst2)))
-  (is (= :bar (persimmon/first lst1))))
+  (is (= :bar (first lst1))))
 
 (deftest conj-rejects-a-value-that-is-not-a-structure
   (is (thrown? (persimmon/conj @[1 2] 3))))
 
 (deftest first-of-an-empty-list
-  (is (= nil (persimmon/first (persimmon/list)))))
+  (is (= nil (first (persimmon/list)))))
 
 (deftest rest-of-a-list
   (def lst1 (persimmon/list :foo :bar :qux))
   (def lst2 (persimmon/rest lst1))
   (is (= 2 (length lst2)))
-  (is (= :bar (persimmon/first lst2)))
+  (is (= :bar (first lst2)))
   (is (== [:bar :qux] (persimmon/to-array lst2))))
 
 (deftest rest-of-an-empty-list-is-an-empty-list
   (def lst (persimmon/rest (persimmon/list)))
   (is (= 0 (length lst)))
-  (is (= nil (persimmon/first lst))))
+  (is (= nil (first lst))))
 
 (deftest rest-does-not-modify-the-original-list
   (def lst1 (persimmon/list :foo :bar :qux))
   (def lst2 (persimmon/rest lst1))
   (is (= 3 (length lst1)))
-  (is (= :foo (persimmon/first lst1)))
+  (is (= :foo (first lst1)))
   (is (== [:foo :bar :qux] (persimmon/to-array lst1)))
   (is (== [:bar :qux] (persimmon/to-array lst2))))
 
@@ -203,7 +203,7 @@
   (def expect (numbers 1000))
   (def lst (persimmon/list ;expect))
   (is (= 1000 (length lst)))
-  (is (= 0 (persimmon/first lst)))
+  (is (= 0 (first lst)))
   (is (= 999 (get lst 999)))
   (is (== expect (persimmon/to-array lst))))
 
@@ -213,7 +213,7 @@
   (for i 0 200000
     (set lst (persimmon/conj lst i)))
   (is (= 200000 (length lst)))
-  (is (= 199999 (persimmon/first lst)))
+  (is (= 199999 (first lst)))
   (set lst nil)
   (gccollect)
   (is (= nil lst)))
@@ -255,7 +255,7 @@
   (def lst1 (persimmon/list :foo :bar :qux))
   (def lst2 (unmarshal (marshal lst1)))
   (is (= lst1 lst2))
-  (is (= :foo (persimmon/first lst2)))
+  (is (= :foo (first lst2)))
   (is (== @[:foo :bar :qux] (persimmon/to-array lst2))))
 
 (deftest marshalling-an-empty-list
@@ -267,7 +267,7 @@
 (deftest marshalling-preserves-the-order-of-a-list
   (def lst (unmarshal (marshal (persimmon/list ;(numbers 1000)))))
   (is (= 1000 (length lst)))
-  (is (= 0 (persimmon/first lst)))
+  (is (= 0 (first lst)))
   (is (== (numbers 1000) (persimmon/to-array lst))))
 
 # A list read back carries a cursor of its own, which has to start from the
