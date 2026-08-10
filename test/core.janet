@@ -52,7 +52,12 @@
   # output outgrows the pipe buffer from blocking on a reader that is itself
   # blocked waiting for the command to exit.
   (def out (ev/read (proc :out) :all))
-  [(os/proc-wait proc) (if out (string out) "")])
+  # Windows hands a command a stdout in text mode, so what arrives here ends
+  # its lines with a carriage return and a newline. Settling that once, where
+  # the bytes come in, keeps it out of everything downstream: a caller
+  # matching against the output needs no second spelling of each line, and one
+  # echoed back to a terminal is not translated a second time on the way out.
+  [(os/proc-wait proc) (if out (string/replace-all "\r\n" "\n" (string out)) "")])
 
 (defn- report
   ``Puts a command's output on the terminal verbatim, since a compiler lines
